@@ -56,11 +56,22 @@ def main():
     
     print(f"Initial RAM: {get_rss_gb():.2f} GB")
     
-    # Simple prompt
-    prompt = "Explain quantum gravity"
+    # A much longer prompt to prove it's not just "cheating" on a tiny sequence
+    prompt = (
+        "The history of artificial intelligence and machine learning dates back to antiquity, "
+        "with myths, stories and rumors of artificial beings endowed with intelligence or consciousness "
+        "by master craftsmen. The seeds of modern AI were planted by classical philosophers who attempted "
+        "to describe the process of human thinking as the mechanical manipulation of symbols. "
+        "This work culminated in the invention of the programmable digital computer in the 1940s, "
+        "a machine based on the abstract essence of mathematical reasoning. This device and the ideas "
+        "behind it inspired a handful of scientists to begin seriously discussing the possibility of building "
+        "an electronic brain. \n\n"
+    ) * 20  # Repeat to make it very long
+
     tokens = mx.array(tokenizer.encode(prompt))[None]
     
-    print("\n--- Starting Manual Forward Pass (Proof of Flash) ---")
+    print(f"\nPrompt length: {tokens.shape[1]} tokens")
+    print("--- Starting Manual Forward Pass (Proof of Flash) ---")
     t0 = time.perf_counter()
     
     # 1. Prefill
