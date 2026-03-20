@@ -25,6 +25,7 @@ from ..config import FlashConfig
 from ..manager import FlashManager
 
 _ORIGINAL_LOAD: Any | None = None
+_ORIGINAL_STREAM_GENERATE: Any | None = None
 _MANAGER: FlashManager | None = None
 
 
@@ -38,7 +39,7 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
         If None, a default FlashConfig is used.  enabled defaults to False
         so the patch is a no-op unless explicitly activated.
     """
-    global _ORIGINAL_LOAD, _MANAGER
+    global _ORIGINAL_LOAD, _ORIGINAL_STREAM_GENERATE, _MANAGER
 
     if config is None:
         config = FlashConfig(enabled=False)
@@ -58,6 +59,7 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
         return
 
     _ORIGINAL_LOAD = mlx_lm.load
+    _ORIGINAL_STREAM_GENERATE = mlx_lm.stream_generate
     _MANAGER = FlashManager(config)
 
     @functools.wraps(_ORIGINAL_LOAD)  # type: ignore
@@ -78,21 +80,36 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
 
         return _MANAGER.load(model, load_fn=_ORIGINAL_LOAD, **kwargs)
 
+    @functools.wraps(_ORIGINAL_STREAM_GENERATE)  # type: ignore
+    def _patched_stream_generate(model: Any, *args: Any, **kwargs: Any) -> Any:
+        # If this model is running in flash mode, we MUST keep the prefill
+        # graph small to avoid OOM during long context ingestion.
+        if getattr(model, "_flash_enabled", False):
+            # Default in mlx_lm is 2048 or 512. 64 is safe for 16GB Macs running 30B+ models.
+            kwargs.setdefault("prefill_step_size", 64)
+        assert _ORIGINAL_STREAM_GENERATE is not None
+        return _ORIGINAL_STREAM_GENERATE(model, *args, **kwargs)
+
     mlx_lm.load = _patched_load  # type: ignore
+    mlx_lm.stream_generate = _patched_stream_generate  # type: ignore
+
 
 def remove_flash_patch() -> None:
     """Restore the original mlx_lm.load (useful for tests)."""
-    global _ORIGINAL_LOAD, _MANAGER
+    global _ORIGINAL_LOAD, _ORIGINAL_STREAM_GENERATE, _MANAGER
     if _ORIGINAL_LOAD is None:
         return
     try:
         import mlx_lm
         mlx_lm.load = _ORIGINAL_LOAD
+        if _ORIGINAL_STREAM_GENERATE is not None:
+            mlx_lm.stream_generate = _ORIGINAL_STREAM_GENERATE
     except ImportError:
         pass
     if _MANAGER is not None:
         _MANAGER.shutdown()
     _ORIGINAL_LOAD = None
+    _ORIGINAL_STREAM_GENERATE = None
     _MANAGER = None
 
 
