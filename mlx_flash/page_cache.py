@@ -4,7 +4,6 @@ import ctypes
 import mmap
 import os
 import sys
-from typing import Any
 
 """
 page_cache.py — macOS unified page cache management via madvise().

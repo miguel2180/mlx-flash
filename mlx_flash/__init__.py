@@ -22,7 +22,6 @@ from .config import FlashConfig
 from .generation import FlashGenerationLoop, FlashLLM
 from .manager import FlashManager
 
-
 __all__ = [
     "FlashConfig",
     "FlashManager",
