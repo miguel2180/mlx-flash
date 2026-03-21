@@ -7,7 +7,6 @@ from typing import Any
 import mlx.core as mx
 import mlx.nn as nn
 import mlx_lm
-from mlx.utils import tree_flatten
 from mlx_lm.models.base import create_attention_mask
 
 from .config import FlashConfig
@@ -170,7 +169,7 @@ class FlashLLM(nn.Module):
         try:
             model = object.__getattribute__(self, "_model")
         except AttributeError:
-            raise AttributeError(name)
+            raise AttributeError(name) from None
         return getattr(model, name)
 
 class FlashGenerationLoop:
@@ -232,10 +231,7 @@ class FlashGenerationLoop:
             from mlx_lm.models.cache import make_prompt_cache
             self._cache = make_prompt_cache(self.model)
             
-        if config.kv_cache_dir:
-            self.flash_model.disk_cache = DiskKVCache(
-                n_layers, config.max_in_memory_kv_tokens, config.kv_cache_dir
-            )
+
 
     def _chunked_prefill(self, prompt_tokens: list[int], **kwargs):
         """Process a long prompt in chunks to avoid attention OOM."""

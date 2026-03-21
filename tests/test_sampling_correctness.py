@@ -1,9 +1,7 @@
 
 import mlx.core as mx
-import pytest
 
 from mlx_flash.generation import FlashGenerationLoop
-
 
 
 def test_first_token_sampling_temperature(tmp_model_dir):

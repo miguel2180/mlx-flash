@@ -1,9 +1,10 @@
 
 import mlx.core as mx
-import pytest
 import mlx_lm
+
 from mlx_flash import FlashConfig
 from mlx_flash.integration.lmstudio import apply_flash_patch, remove_flash_patch
+
 
 def test_native_stream_generate_with_patch(tmp_model_dir):
     """Verify that mlx_lm.stream_generate works with patched FlashLLM."""
