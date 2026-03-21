@@ -88,11 +88,6 @@ class FlashLLM(nn.Module):
         # Pre-layer: embedding
         h = self._pre_layer_fn(x)
         
-        # Create causal mask if not provided
-        if mask is None and h.shape[1] > 1:
-            mask = nn.MultiHeadAttention.create_additive_causal_mask(h.shape[1])
-            mask = mask.astype(h.dtype)
-        
         # Per-layer synchronous execution
         for i, layer in enumerate(self._layers):
             cache_entry = cache[i] if cache is not None else None
@@ -243,24 +238,26 @@ class FlashGenerationLoop:
     def stream_generate(self, prompt: str, max_tokens: int = 100, **kwargs) -> Generator[str, None, None]:
         tokens = self.tokenizer.encode(prompt)
         
-        # mlx_lm expects the model to be callable and return logits
-        # We've wrapped our model in FlashLLM which iterates layers.
-        # But mlx_lm.generate_step builds its own cache if not provided.
-        # We need to ensure it uses OUR FlashLLM and OUR cache.
+        # Extract sampling parameters
+        from mlx_lm.sample_utils import make_sampler
+        sampler_args = {
+            "temp": kwargs.pop("temp", kwargs.pop("temperature", 0.0)),
+            "top_p": kwargs.pop("top_p", 1.0),
+            "top_k": kwargs.pop("top_k", 0),
+        }
+        sampler = make_sampler(**sampler_args)
         
-        # Let's implement a clean loop using mlx_lm logic but our forward pass.
+        # mlx_lm expects the model to be callable and return logits
         logits = self._chunked_prefill(tokens, **kwargs)
         
         count = 0
         from mlx_lm.generate import generate_step
         
         # The first token is already computed in prefill logits
-        # But generate_step usually starts from scratch or a state.
-        # We follow the mlx_lm pattern:
         y = mx.argmax(logits[:, -1, :], axis=-1)
         yield self.tokenizer.decode([y.item()])
         
-        for token_id, _ in generate_step(y, self.flash_model, prompt_cache=self._cache, **kwargs):
+        for token_id, _ in generate_step(y, self.flash_model, prompt_cache=self._cache, sampler=sampler, **kwargs):
             if count >= max_tokens - 1:
                 break
             if token_id == self.tokenizer.eos_token_id:

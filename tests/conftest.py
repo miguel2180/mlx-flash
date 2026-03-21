@@ -164,11 +164,30 @@ def tmp_model_dir(tmp_path_factory):
     return mdir
 
 
+@pytest.fixture(autouse=True)
+def reset_metal_state():
+    """Clear Metal cache before and after each test."""
+    try:
+        import mlx.core as mx
+        mx.metal.clear_cache()
+    except (ImportError, AttributeError):
+        pass
+    yield
+    try:
+        mx.metal.clear_cache()
+        import gc; gc.collect()
+    except (ImportError, AttributeError):
+        pass
+
+
 @pytest.fixture
 def flash_config():
-    from mlx_engine_flash import FlashConfig
+    from mlx_engine_flash.config import FlashConfig
     return FlashConfig(
         enabled=True,
-        ram_budget_gb=2.0,
-        debug=True,
+        ram_budget_gb=1.0,   # Very tight budget to catch regressions
+        # moe_top_k_override=2, # Removed from FlashConfig in previous edit
+        debug=False,          # Avoid print noise in tests
+        max_kv_size=64,       # Small KV cache for tests
+        prefill_chunk_size=32,
     )
