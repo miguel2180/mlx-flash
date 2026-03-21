@@ -119,7 +119,7 @@ def main():
     print("Building benchmark model...")
     build_benchmark_model(bench_dir)
     
-    contexts = [512, 1024, 2048, 4096, 8192]
+    contexts = [512, 1024, 2048, 4096, 8192, 16384, 32768]
     results = []
     
     # Warmup
@@ -128,7 +128,13 @@ def main():
     for ctx in contexts:
         # Standard vs Disk KV
         res_std = run_benchmark_iter(bench_dir, ctx, False)
+        # Check SSD size for Disk KV after prefill
         res_flash = run_benchmark_iter(bench_dir, ctx, True)
+        
+        # Get SSD file sizes (only for FLASH)
+        kv_dir = Path("/tmp/bench_kv")
+        ssd_bytes = sum(f.stat().st_size for f in kv_dir.glob("*.safetensors")) if kv_dir.exists() else 0
+        res_flash["ssd_mb"] = ssd_bytes / (1024 * 1024)
         
         results.append({
             "context": ctx,
@@ -137,16 +143,16 @@ def main():
         })
         
     # Pretty Print results
-    print("\n" + "="*80)
-    print(f"{'Context':<10} | {'Mode':<8} | {'Prefill T/s':<12} | {'Gen T/s':<8} | {'RAM Gain (MB)':<12}")
-    print("-" * 80)
+    print("\n" + "="*95)
+    print(f"{'Context':<10} | {'Mode':<8} | {'Prefill T/s':<12} | {'Gen T/s':<8} | {'RAM Gain (MB)':<12} | {'SSD Cache (MB)':<12}")
+    print("-" * 95)
     for r in results:
         c = r['context']
         s = r['std']
         f = r['flash']
-        print(f"{c:<10} | {'STD':<8} | {s['prefill_ts']:>11.1f} | {s['gen_ts']:>7.1f} | {s['ram_growth_mb']:>11.1f}")
-        print(f"{'':<10} | {'FLASH':<8} | {f['prefill_ts']:>11.1f} | {f['gen_ts']:>7.1f} | {f['ram_growth_mb']:>11.1f}")
-        print("-" * 80)
+        print(f"{c:<10} | {'STD':<8} | {s['prefill_ts']:>11.1f} | {s['gen_ts']:>7.1f} | {s['ram_growth_mb']:>11.1f} | {'-':>12}")
+        print(f"{'':<10} | {'FLASH':<8} | {f['prefill_ts']:>11.1f} | {f['gen_ts']:>7.1f} | {f['ram_growth_mb']:>11.1f} | {f['ssd_mb']:>12.1f}")
+        print("-" * 95)
 
 if __name__ == "__main__":
     main()
