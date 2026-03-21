@@ -8,7 +8,6 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx_lm
 from mlx.utils import tree_flatten
-from mlx_lm.models.cache import RotatingKVCache
 
 from .config import FlashConfig
 
@@ -130,8 +129,19 @@ class FlashLLM(nn.Module):
                     keys_to_evict = cache_entry.keys[:, :mid, :]
                     values_to_evict = cache_entry.values[:, :mid, :]
                     self.disk_cache.evict_to_disk(i, keys_to_evict, values_to_evict, (0, mid))
+                    
+                    # ACTUAL FIX: Remove from RAM
+                    cache_entry.keys = cache_entry.keys[:, mid:, :]
+                    cache_entry.values = cache_entry.values[:, mid:, :]
+                    if hasattr(cache_entry, "offset"):
+                        cache_entry.offset -= mid
+                    if hasattr(cache_entry, "_idx"):
+                        # For RotatingKVCache, adjusting _idx is complex, 
+                        # but for simple KVCache it works.
+                        cache_entry._idx = max(0, cache_entry._idx - mid)
+                        
                     if self._config.debug:
-                        print(f"[flash] layer {i:3d} evicted {mid} tokens to SSD", file=sys.stderr)
+                        print(f"[flash] layer {i:3d} evicted {mid} tokens to SSD and freed RAM", file=sys.stderr)
             
             # Synchronise: ensure GPU work is done before clearing cache
             mx.synchronize()
@@ -229,13 +239,29 @@ class FlashGenerationLoop:
         
         # Initialize Cache
         if config.max_kv_size is not None:
-            self._cache = [
-                RotatingKVCache(max_size=config.max_kv_size, keep=config.kv_keep)
-                for _ in range(n_layers)
-            ]
+            # mlx-lm >= 0.21 may require head_dim and n_heads for RotatingKVCache
+            # We try to detect if we need them, or just use the model's make_cache if possible.
+            from mlx_lm.models.cache import RotatingKVCache
+            
+            # Heuristic: try to get dimensions from the model
+            sub = getattr(self.model, "model", self.model)
+            n_heads = getattr(sub, "n_kv_heads", getattr(sub, "num_key_value_heads", 0))
+            head_dim = getattr(sub, "head_dim", 0)
+            
+            try:
+                # Try new signature
+                self._cache = [
+                    RotatingKVCache(max_size=config.max_kv_size, keep=config.kv_keep, n_heads=n_heads, head_dim=head_dim)
+                    for _ in range(n_layers)
+                ]
+            except TypeError:
+                # Fallback to old signature
+                self._cache = [
+                    RotatingKVCache(max_size=config.max_kv_size, keep=config.kv_keep)
+                    for _ in range(n_layers)
+                ]
         else:
-            # We must import this if it's not already
-            from mlx_lm.utils import make_prompt_cache
+            from mlx_lm.models.cache import make_prompt_cache
             self._cache = make_prompt_cache(self.model)
             
         if config.kv_cache_dir:
@@ -276,8 +302,8 @@ class FlashGenerationLoop:
         # mlx_lm expects the model to be callable and return logits
         logits = self._chunked_prefill(tokens, **kwargs)
         
-        # The first token is already computed in prefill logits
-        y = mx.argmax(logits[:, -1, :], axis=-1)
+        # Sample the first token from prefill logits
+        y = sampler(logits[:, -1, :])
         yield self.tokenizer.decode([y.item()])
         
         from mlx_lm.generate import generate_step

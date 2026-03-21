@@ -55,7 +55,7 @@ class TelemetryBridge(threading.Thread):
 def start_telemetry(config: Any):
     """Initialize the telemetry bridge for external monitors."""
     if config.monitor_queue is None:
-        config.monitor_queue = queue.Queue()
+        config.monitor_queue = queue.Queue(maxsize=1000)
     bridge = TelemetryBridge(config.monitor_queue)
     bridge.start()
     return bridge

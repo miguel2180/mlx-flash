@@ -97,8 +97,8 @@ def tmp_model_dir(tmp_path_factory):
     hidden_dim=256, intermediate=512, n_experts=0 (dense).
     """
     mdir = tmp_path_factory.mktemp("test_model")
+    rng = np.random.default_rng(42)
     def rand_f16(shape: list[int]) -> bytes:
-        rng = np.random.default_rng(42)
         return rng.standard_normal(shape).astype(np.float16).tobytes()
 
     tensors = {}
@@ -127,7 +127,7 @@ def tmp_model_dir(tmp_path_factory):
 
     # Final norm + lm_head
     tensors["model.norm.weight"]  = (np.ones(256, dtype=np.float16).tobytes(), "F16", [256])
-    tensors["lm_head.weight"]     = (np.random.randn(256, 256).astype(np.float16).tobytes(), "F16", [256, 256])
+    tensors["lm_head.weight"]     = (rng.standard_normal([256, 256]).astype(np.float16).tobytes(), "F16", [256, 256])
 
     _write_safetensors(mdir / "model.safetensors", tensors)
 

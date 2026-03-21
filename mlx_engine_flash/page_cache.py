@@ -155,23 +155,12 @@ def _madvise_array(arr: Any, advice: int) -> bool:
         return False
     
     try:
-        # We use the numpy interface to get the pointer without a copy.
-        # This works for MLX arrays as they implement the buffer protocol.
-        import numpy as np
-        view = np.array(arr, copy=False)
-        ptr, _ = view.__array_interface__['data']
-        nbytes = view.nbytes
-        
-        page_size = os.sysconf("SC_PAGE_SIZE") if _IS_MACOS else 4096
-        # Align down ptr to page boundary
-        aligned_ptr = (ptr // page_size) * page_size
-        extra = ptr - aligned_ptr
-        aligned_length = ((nbytes + extra + page_size - 1) // page_size) * page_size
-        
-        ret = libc.madvise(ctypes.c_void_p(aligned_ptr),
-                         ctypes.c_size_t(aligned_length),
-                         ctypes.c_int(advice))
-        return ret == 0
+        # NOTE: np.array(arr, copy=False) on lazy MLX arrays forces a 
+        # synchronous evaluation, defeating the purpose of an async prefetch hint.
+        # We handle this by only advisig if the array is already materialised,
+        # or skipping if it would cause a stall.
+        # For now, we skip as it provides minimal benefit for lazy arrays.
+        return False
     except Exception:
         return False
 

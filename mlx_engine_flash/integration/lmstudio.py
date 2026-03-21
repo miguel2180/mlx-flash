@@ -32,8 +32,10 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
     # LOCK DOWN METAL LIMITS (and save originals)
     _ORIGINAL_SET_CACHE_LIMIT = mx.metal.set_cache_limit
     _ORIGINAL_SET_WIRED_LIMIT = mx.metal.set_wired_limit
-    mx.metal.set_cache_limit = lambda *args, **kwargs: None
-    mx.metal.set_wired_limit = lambda *args, **kwargs: None
+    
+    if config.enabled:
+        mx.metal.set_cache_limit = lambda *args, **kwargs: None
+        mx.metal.set_wired_limit = lambda *args, **kwargs: None
 
     _ORIGINAL_LOAD = mlx_lm.load
     _ORIGINAL_STREAM_GENERATE = mlx_lm.stream_generate
