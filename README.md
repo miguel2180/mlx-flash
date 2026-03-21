@@ -7,6 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![MLX](https://img.shields.io/badge/MLX-latest-green.svg)](https://github.com/ml-explore/mlx)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey.svg)](https://apple.com)
+[![Tests](https://github.com/matt-k-wong/mlx-flash/actions/workflows/tests.yml/badge.svg)](https://github.com/matt-k-wong/mlx-flash/actions/workflows/tests.yml)
 
 ---
 
