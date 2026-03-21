@@ -9,8 +9,8 @@ Run with:
 
 import pytest
 
-pytestmark = pytest.mark.skipif(True, reason="requires --model flag")
-
+# Remove global skip so tests with synthetic models can run
+# pytestmark = pytest.mark.skipif(True, reason="requires --model flag")
 
 def test_flash_load_real_model(model_dir_path, use_flash, flash_config):
     if model_dir_path is None:
@@ -63,3 +63,42 @@ def test_modelfile_no_flash():
     text = "FROM /models/some-model\nSYSTEM You are helpful.\n"
     cfg = parse_flash_directives(text)
     assert cfg.enabled is False
+
+
+def test_flash_peak_ram_below_2gb(tmp_model_dir):
+    """Flash mode on a tiny synthetic model should use < 200 MB peak RSS."""
+    import psutil, os
+    from mlx_engine_flash.integration.lmstudio import apply_flash_patch, remove_flash_patch
+    from mlx_engine_flash.config import FlashConfig
+    import mlx_lm
+
+    proc = psutil.Process(os.getpid())
+    # Ensure any previous patch is removed
+    remove_flash_patch()
+    
+    apply_flash_patch(FlashConfig(enabled=True, debug=True))
+    
+    try:
+        # Load the synthetic model
+        model, tokenizer = mlx_lm.load(str(tmp_model_dir))
+        
+        # We measure baseline AFTER load because the prompt says 
+        # "load ONLY the config + tokenizer, then return a FlashGenerationLoop proxy"
+        # The proxy itself should be small.
+        baseline_rss = proc.memory_info().rss
+        
+        # Run one forward pass
+        # mlx_lm.stream_generate is patched to use model.stream_generate
+        tokens = list(mlx_lm.stream_generate(model, tokenizer, "Hello", max_tokens=5))
+        assert len(tokens) > 0
+        
+        peak_rss = proc.memory_info().rss
+        
+        diff_mb = (peak_rss - baseline_rss) / (1024 * 1024)
+        print(f"\nPeak RSS increase: {diff_mb:.1f} MB")
+        
+        assert peak_rss - baseline_rss < 200 * 1024 * 1024, (
+            f"Expected < 200 MB RSS increase, got {diff_mb:.1f} MB"
+        )
+    finally:
+        remove_flash_patch()

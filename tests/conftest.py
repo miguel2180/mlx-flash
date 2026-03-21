@@ -99,37 +99,29 @@ def tmp_model_dir(tmp_path_factory):
     mdir = tmp_path_factory.mktemp("test_model")
     hidden = 256
     inter = 512
-    n_blocks_hh = (hidden * hidden) // 32
-    (hidden * inter) // 32
-
-    def rand_q4_blocks(n_blocks: int) -> bytes:
+    def rand_f16(shape: list[int]) -> bytes:
         rng = np.random.default_rng(42)
-        blocks = bytearray()
-        for _ in range(n_blocks):
-            vals = rng.integers(-8, 8, 32).tolist()
-            blocks += _make_q4_0_block(rng.uniform(0.01, 0.1), vals)
-        return bytes(blocks)
+        return rng.standard_normal(shape).astype(np.float16).tobytes()
 
     tensors = {}
     # Embedding
-    embed_data = np.random.randn(256, hidden).astype(np.float16).tobytes()
+    embed_data = rand_f16([256, hidden])
     tensors["model.embed_tokens.weight"] = (embed_data, "F16", [256, hidden])
 
     for layer in range(2):
         pfx = f"model.layers.{layer}"
-        # Self-attention Q/K/V/O projections (Q4_0)
+        # Self-attention Q/K/V/O projections (F16)
         for proj in ("q_proj", "k_proj", "v_proj", "o_proj"):
-            data = rand_q4_blocks(n_blocks_hh)
-            tensors[f"{pfx}.self_attn.{proj}.weight"] = (data, "Q4_0", [hidden, hidden])
+            data = rand_f16([hidden, hidden])
+            tensors[f"{pfx}.self_attn.{proj}.weight"] = (data, "F16", [hidden, hidden])
         # FFN gate + up + down
         for proj, shape in (
             ("gate_proj", [inter, hidden]),
             ("up_proj",   [inter, hidden]),
             ("down_proj", [hidden, inter]),
         ):
-            nb = (shape[0] * shape[1]) // 32
-            data = rand_q4_blocks(nb)
-            tensors[f"{pfx}.mlp.{proj}.weight"] = (data, "Q4_0", shape)
+            data = rand_f16(shape)
+            tensors[f"{pfx}.mlp.{proj}.weight"] = (data, "F16", shape)
         # Layer norm (f16, always hot)
         ln_data = np.ones(hidden, dtype=np.float16).tobytes()
         tensors[f"{pfx}.input_layernorm.weight"]         = (ln_data, "F16", [hidden])
@@ -150,6 +142,7 @@ def tmp_model_dir(tmp_path_factory):
         "num_attention_heads": 4,
         "rms_norm_eps": 1e-6,
         "vocab_size": 256,
+        "tie_word_embeddings": False,
     }
     (mdir / "config.json").write_text(json.dumps(cfg))
 

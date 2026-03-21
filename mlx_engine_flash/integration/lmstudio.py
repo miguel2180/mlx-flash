@@ -4,17 +4,17 @@ import pathlib
 from typing import Any
 
 from ..config import FlashConfig
-from ..manager import FlashManager
 
 _ORIGINAL_LOAD = None
-_MANAGER: FlashManager | None = None
-
+_ORIGINAL_STREAM_GENERATE = None
+_ORIGINAL_GENERATE = None
+_LAST_LOOP = None
 
 def apply_flash_patch(config: FlashConfig | None = None) -> None:
     """
     Monkey-patch mlx_lm to be Flash-compatible.
     """
-    global _ORIGINAL_LOAD, _MANAGER
+    global _ORIGINAL_LOAD, _ORIGINAL_STREAM_GENERATE, _ORIGINAL_GENERATE
 
     if config is None:
         config = FlashConfig(enabled=False)
@@ -26,7 +26,6 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
         raise ImportError("mlx_lm not installed") from e
 
     if _ORIGINAL_LOAD is not None:
-        if _MANAGER is not None: _MANAGER.config = config
         return
 
     # LOCK DOWN METAL LIMITS
@@ -34,81 +33,69 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
     mx.metal.set_wired_limit = lambda *args, **kwargs: None
 
     _ORIGINAL_LOAD = mlx_lm.load
-    _MANAGER = FlashManager(config)
+    _ORIGINAL_STREAM_GENERATE = mlx_lm.stream_generate
+    _ORIGINAL_GENERATE = getattr(mlx_lm, "generate", None)
 
     # 1. Patch LOAD
-    @functools.wraps(_ORIGINAL_LOAD)
-    def _patched_load(model: str, *args: Any, **kwargs: Any) -> Any:
-        should_flash = _should_use_flash(model, config)
-        if not should_flash:
-            return _ORIGINAL_LOAD(model, *args, **kwargs)
-        return _MANAGER.load(model, **kwargs)
-
-    mlx_lm.load = _patched_load
-
-    # 2. Patch stream_generate with PRODUCTION GUARDRAILS
-    def _flash_stream_generate(model, tokenizer, prompt, *args, **kwargs):
-        """Stable entry point with hard guardrails against Metal OOM."""
-        import mlx.core as mx
-        from mlx_lm.generate import generate_step
-
-        # Enforce basic safety
-        kwargs.setdefault("prefill_step_size", 1)
-        kwargs.setdefault("kv_bits", 4)
-
-        # 1. ALWAYS Encode prompt to tokens for reliable chunking
-        if isinstance(prompt, str):
-            token_list = tokenizer.encode(prompt)
-        else:
-            token_list = prompt.tolist() if hasattr(prompt, "tolist") else list(prompt)
+    def _flash_load(path, **kwargs):
+        if not _should_use_flash(str(path), config):
+            return _ORIGINAL_LOAD(path, **kwargs)
         
-        original_len = len(token_list)
+        from ..generation import FlashGenerationLoop
+        from mlx_lm.utils import load_tokenizer
+        from pathlib import Path
+        
+        global _LAST_LOOP
+        
+        # Return a FlashGenerationLoop proxy + tokenizer
+        # The proxy's .stream_generate() runs synchronous per-layer execution
+        tokenizer = load_tokenizer(Path(path))
+        _LAST_LOOP = FlashGenerationLoop(Path(path), config)
+        return _LAST_LOOP, tokenizer  # satisfies (model, tokenizer) contract
 
-        # 2. APPLY GUARDRAIL
-        current_config = _MANAGER.config if _MANAGER else config
-        if original_len > current_config.max_safe_context_tokens and current_config.strict_guardrails:
-            safe_len = current_config.max_safe_context_tokens
-            print(f"\n[mlx-flash] ⚠️  GUARDRAIL ACTIVATED")
-            print(f"   Prompt length: {original_len} tokens → truncated to last {safe_len} tokens")
-            print(f"   Reason: Large model + long prompt exceeds Metal graph limits on 16 GB Mac")
-            print(f"   Recommendation: For full long-context (2k+ tokens) use llama.cpp (GGUF) instead")
-            print(f"   (This is the documented limitation of current MLX — not a bug in mlx-flash)\n")
-            token_list = token_list[-safe_len:]
+    mlx_lm.load = _flash_load
 
-        # 3. Create a Response-like wrapper to match mlx_lm.stream_generate
-        class Response:
-            def __init__(self, text, token):
-                self.text = text
-                self.token = token
-
-        # Convert back to MLX array for generate_step
-        tokens_mx = mx.array(token_list)
-
-        # 4. Filter kwargs for generate_step
-        valid_args = {
-            "max_tokens", "sampler", "logits_processors", "max_kv_size",
-            "prompt_cache", "prefill_step_size", "kv_bits", "kv_group_size"
-        }
-        gen_kwargs = {k: v for k, v in kwargs.items() if k in valid_args}
-
-        # 5. Execute generation
-        for token, _ in generate_step(tokens_mx, model, **gen_kwargs):
-            text = tokenizer.decode([token.item()])
-            yield Response(text, token.item())
-            mx.synchronize()
-            mx.clear_cache()
+    # 2. Patch stream_generate
+    def _flash_stream_generate(model, tokenizer, prompt, **kwargs):
+        from ..generation import FlashGenerationLoop
+        if isinstance(model, FlashGenerationLoop):
+            # Use our synchronous loop
+            yield from model.stream_generate(prompt, **kwargs)
+        else:
+            yield from _ORIGINAL_STREAM_GENERATE(model, tokenizer, prompt, **kwargs)
 
     mlx_lm.stream_generate = _flash_stream_generate
 
+    # 3. Patch generate (optional but good for completeness)
+    if _ORIGINAL_GENERATE:
+        def _flash_generate(model, tokenizer, prompt, **kwargs):
+            from ..generation import FlashGenerationLoop
+            if isinstance(model, FlashGenerationLoop):
+                # Just join the stream
+                return "".join(list(model.stream_generate(prompt, **kwargs)))
+            else:
+                return _ORIGINAL_GENERATE(model, tokenizer, prompt, **kwargs)
+        mlx_lm.generate = _flash_generate
+
+
 def remove_flash_patch() -> None:
     """Restore the original state."""
-    global _ORIGINAL_LOAD, _MANAGER
+    global _ORIGINAL_LOAD, _ORIGINAL_STREAM_GENERATE, _ORIGINAL_GENERATE, _LAST_LOOP
     if _ORIGINAL_LOAD is None: return
+    
     import mlx_lm
     mlx_lm.load = _ORIGINAL_LOAD
-    if _MANAGER: _MANAGER.shutdown()
+    mlx_lm.stream_generate = _ORIGINAL_STREAM_GENERATE
+    if _ORIGINAL_GENERATE:
+        mlx_lm.generate = _ORIGINAL_GENERATE
+        
+    if _LAST_LOOP and hasattr(_LAST_LOOP, "manager"):
+        _LAST_LOOP.manager.shutdown()
+    
     _ORIGINAL_LOAD = None
-    _MANAGER = None
+    _ORIGINAL_STREAM_GENERATE = None
+    _ORIGINAL_GENERATE = None
+    _LAST_LOOP = None
 
 
 def _should_use_flash(model_path: str, config: FlashConfig) -> bool:

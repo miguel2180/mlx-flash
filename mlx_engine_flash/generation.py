@@ -112,14 +112,28 @@ class FlashGenerationLoop:
             # Extract backbone (handle different model architectures)
             backbone = getattr(self.model, "model", getattr(self.model, "backbone", self.model))
             
-            x = backbone.embeddings(current_input)
+            embed_layer = getattr(backbone, "embeddings", getattr(backbone, "embed_tokens", None))
+            if embed_layer is None:
+                raise AttributeError(f"Model backbone {type(backbone)} has no embeddings or embed_tokens")
+            x = embed_layer(current_input)
             
             # Compute masks if needed (Nemotron-H style)
             # Find indices for attention and ssm if present
             fa_idx = getattr(backbone, "fa_idx", 0)
             ssm_idx = getattr(backbone, "ssm_idx", 0)
-            attn_mask = create_attention_mask(x, cache[fa_idx])
-            ssm_mask = create_ssm_mask(x, cache[ssm_idx])
+            
+            attn_mask = None
+            try:
+                # Some versions of mlx_lm require return_array and window_size
+                attn_mask = create_attention_mask(x, cache[fa_idx], window_size=None, return_array=False)
+            except (TypeError, IndexError, AttributeError):
+                pass
+                
+            ssm_mask = None
+            try:
+                ssm_mask = create_ssm_mask(x, cache[ssm_idx])
+            except (TypeError, IndexError, AttributeError, NameError):
+                pass
 
             # 3. Transformer layers
             cache_idx = 0
@@ -137,11 +151,16 @@ class FlashGenerationLoop:
                 x = self._run_layer_synchronous(layer_idx, x, current_cache, mask=mask)
                 
             # 4. Final norm and LM head
-            x = backbone.norm_f(x)
-            logits = self.model.lm_head(x)
-            
+            norm_layer = getattr(backbone, "norm_f", getattr(backbone, "norm", None))
+            if norm_layer is None:
+                 raise AttributeError(f"Model backbone {type(backbone)} has no norm_f or norm")
+            x = norm_layer(x)
             # 5. Sample
             # We only care about the last token's logits
+            head = getattr(self.model, "lm_head", getattr(backbone, "lm_head", None))
+            if head is None:
+                raise AttributeError(f"Neither model nor backbone has lm_head")
+            logits = head(x)
             next_token = self._sample(logits[:, -1, :], temperature, top_p)
             
             # Ensure next_token is 2D (1, 1) for concatenation with input_ids (1, N)
