@@ -131,12 +131,6 @@ def tmp_model_dir(tmp_path_factory):
     tensors["model.norm.weight"]  = (np.ones(256, dtype=np.float16).tobytes(), "F16", [256])
     tensors["lm_head.weight"]     = (np.random.randn(256, 256).astype(np.float16).tobytes(), "F16", [256, 256])
 
-    # Add a dummy Q4_0 tensor just for dtype testing in test_streamer.py
-    # Each Q4_0 block is 32 elements -> 18 bytes.
-    # 32 elements -> (0.1 scale) + (32 nibbles)
-    q4_data = b"\x00\x3c" + b"\x88" * 16  # scale=1.0, 32 zeros
-    tensors["test_q4_tensor"] = (q4_data, "Q4_0", [32])
-
     _write_safetensors(mdir / "model.safetensors", tensors)
 
     # config.json

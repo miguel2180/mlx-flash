@@ -19,15 +19,17 @@ Or via Modelfile:
 """
 
 from .config import FlashConfig
-from .loader import FlashModelLoader
 from .manager import FlashManager
-from .streamer import WeightStreamer
+from .generation import FlashLLM, FlashGenerationLoop
+from .page_cache import prefetch_array, release_array
 
 __all__ = [
     "FlashConfig",
     "FlashManager",
-    "FlashModelLoader",
-    "WeightStreamer",
+    "FlashLLM",
+    "FlashGenerationLoop",
+    "prefetch_array",
+    "release_array",
 ]
 
 __version__ = "0.1.0"

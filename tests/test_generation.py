@@ -15,4 +15,4 @@ def test_flash_generation_non_empty(tmp_model_dir):
         assert len(tokens) > 0, "Expected non-empty output from generator"
         assert all(isinstance(t, str) for t in tokens)
     finally:
-        loop.manager.shutdown()
+        pass

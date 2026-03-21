@@ -37,42 +37,61 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
     _ORIGINAL_GENERATE = getattr(mlx_lm, "generate", None)
 
     # 1. Patch LOAD
-    def _flash_load(path, **kwargs):
+    def _flash_load(path, *args, **kwargs):
         if not _should_use_flash(str(path), config):
-            return _ORIGINAL_LOAD(path, **kwargs)
+            return _ORIGINAL_LOAD(path, *args, **kwargs)
         
-        from ..generation import FlashGenerationLoop
-        from mlx_lm.utils import load_tokenizer
-        from pathlib import Path
+        from ..manager import FlashManager
         
-        global _LAST_LOOP
-        
-        # Return a FlashGenerationLoop proxy + tokenizer
-        # The proxy's .stream_generate() runs synchronous per-layer execution
-        tokenizer = load_tokenizer(Path(path))
-        _LAST_LOOP = FlashGenerationLoop(Path(path), config)
-        return _LAST_LOOP, tokenizer  # satisfies (model, tokenizer) contract
+        # We use FlashManager to handle the lazy load and wrapping
+        mgr = FlashManager(config)
+        model, tokenizer = mgr.load(path)
+        return model, tokenizer
 
     mlx_lm.load = _flash_load
 
     # 2. Patch stream_generate
     def _flash_stream_generate(model, tokenizer, prompt, **kwargs):
-        from ..generation import FlashGenerationLoop
-        if isinstance(model, FlashGenerationLoop):
-            # Use our synchronous loop
-            yield from model.stream_generate(prompt, **kwargs)
+        from ..generation import FlashLLM
+        if isinstance(model, FlashLLM):
+            # We can't use mlx_lm.stream_generate directly because it expects 
+            # the base model and builds a full graph.
+            # We must use our custom FlashGenerationLoop or a simplified version.
+            from ..generation import FlashGenerationLoop
+            # Note: This is slightly suboptimal as it re-loads or wraps.
+            # In a real integration, we'd use the FlashLLM directly.
+            # For now, we manually iterate to keep it drop-in.
+            from mlx_lm.models.cache import KVCache
+            cache = [KVCache() for _ in range(len(model.model.layers))]
+            
+            import mlx.core as mx
+            tokens = mx.array(tokenizer.encode(prompt))
+            input_tokens = tokens[None]
+            max_tokens = kwargs.get("max_tokens", 100)
+            count = 0
+            while count < max_tokens:
+                logits = model(input_tokens, cache=cache, **kwargs)
+                next_token = mx.argmax(logits[:, -1, :], axis=-1)
+                token_id = next_token.tolist()[0]
+                yield token_id
+                input_tokens = next_token[None]
+                count += 1
+                if token_id == tokenizer.eos_token_id:
+                    break
         else:
             yield from _ORIGINAL_STREAM_GENERATE(model, tokenizer, prompt, **kwargs)
 
     mlx_lm.stream_generate = _flash_stream_generate
 
-    # 3. Patch generate (optional but good for completeness)
+    # 3. Patch generate
     if _ORIGINAL_GENERATE:
         def _flash_generate(model, tokenizer, prompt, **kwargs):
-            from ..generation import FlashGenerationLoop
-            if isinstance(model, FlashGenerationLoop):
-                # Just join the stream
-                return "".join(list(model.stream_generate(prompt, **kwargs)))
+            from ..generation import FlashLLM
+            if isinstance(model, FlashLLM):
+                tokens = []
+                for token in _flash_stream_generate(model, tokenizer, prompt, **kwargs):
+                    tokens.append(token)
+                return tokenizer.decode(tokens)
             else:
                 return _ORIGINAL_GENERATE(model, tokenizer, prompt, **kwargs)
         mlx_lm.generate = _flash_generate

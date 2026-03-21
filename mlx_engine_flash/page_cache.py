@@ -147,6 +147,47 @@ def set_sequential(mm: mmap.mmap, offset: int, length: int) -> bool:
     return madvise_range(mm, offset, length, MADV_SEQUENTIAL)
 
 
+def _madvise_array(arr: Any, advice: int) -> bool:
+    """Internal helper to call madvise on the memory backing an MLX array."""
+    libc = _get_libc()
+    if libc is None:
+        return False
+    
+    try:
+        # We use the numpy interface to get the pointer without a copy.
+        # This works for MLX arrays as they implement the buffer protocol.
+        import numpy as np
+        view = np.array(arr, copy=False)
+        ptr, _ = view.__array_interface__['data']
+        nbytes = view.nbytes
+        
+        page_size = os.sysconf("SC_PAGE_SIZE") if _IS_MACOS else 4096
+        # Align down ptr to page boundary
+        aligned_ptr = (ptr // page_size) * page_size
+        extra = ptr - aligned_ptr
+        aligned_length = ((nbytes + extra + page_size - 1) // page_size) * page_size
+        
+        ret = libc.madvise(ctypes.c_void_p(aligned_ptr),
+                         ctypes.c_size_t(aligned_length),
+                         ctypes.c_int(advice))
+        return ret == 0
+    except Exception:
+        return False
+
+
+def prefetch_array(arr: Any) -> bool:
+    """Issue MADV_WILLNEED on the mmap pages backing an MLX array."""
+    return _madvise_array(arr, MADV_WILLNEED)
+
+
+def release_array(arr: Any, strategy: str = "free") -> bool:
+    """Issue MADV_FREE or MADV_DONTNEED on the memory backing an MLX array."""
+    if strategy == "none":
+        return True
+    advice = MADV_FREE if strategy == "free" else MADV_DONTNEED
+    return _madvise_array(arr, advice)
+
+
 class PageCacheRegion:
     """
     Context manager that prefetches a mmap region on entry and

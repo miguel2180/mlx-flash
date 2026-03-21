@@ -12,30 +12,6 @@ import pytest
 # Remove global skip so tests with synthetic models can run
 # pytestmark = pytest.mark.skipif(True, reason="requires --model flag")
 
-def test_flash_load_real_model(model_dir_path, use_flash, flash_config):
-    if model_dir_path is None:
-        pytest.skip("No --model provided")
-    if not use_flash:
-        pytest.skip("Pass --flash to enable this test")
-
-    from pathlib import Path
-
-    from mlx_engine_flash.loader import FlashModelLoader
-
-    mdir = Path(model_dir_path)
-    assert mdir.exists(), f"Model dir not found: {mdir}"
-
-    with FlashModelLoader(mdir, flash_config) as loader:
-        n = loader.n_layers
-        assert n > 0, "Expected > 0 layers"
-
-        # Load first and last layer
-        w0 = loader.get_layer_weights(0)
-        wn = loader.get_layer_weights(n - 1)
-        assert len(w0) > 0
-        assert len(wn) > 0
-
-    print(f"\n✅  Loaded {n}-layer model from {mdir.name} in Flash Mode")
 
 
 def test_modelfile_directive():
@@ -88,7 +64,7 @@ def test_flash_peak_ram_below_2gb(tmp_model_dir):
         baseline_rss = proc.memory_info().rss
         
         # Run one forward pass
-        # mlx_lm.stream_generate is patched to use model.stream_generate
+        # mlx_lm.stream_generate is patched to use our custom loop for FlashLLM
         tokens = list(mlx_lm.stream_generate(model, tokenizer, "Hello", max_tokens=5))
         assert len(tokens) > 0
         
