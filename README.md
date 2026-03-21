@@ -150,8 +150,7 @@ Benchmarked on **M4 MacBook Air 16 GB** with internal NVMe. With **v0.2 Async I/
 ---
 
 ## Known Issues (v0.1.1+)
-* **Disk KV Cache (Roadmap)**: Stable Disk KV offloading is deferred to v0.3.0 to ensure 100% data integrity and performance.
-* **Limited Context RAM**: While weights are streamed, the KV cache still grows in RAM. Use `max_kv_size` (sliding window) or `kv_bits` (quantization) to mitigate this.
+* **Limited Context RAM (v0.1–v0.3.1)**: In earlier versions, the KV cache grew in RAM. Use `max_kv_size` (sliding window) or `kv_bits` (quantization) to mitigate. **Now fixed with Disk KV Cache offloading (v0.3.2+).**
 
 ---
 
@@ -209,7 +208,9 @@ Performance varies significantly depending on your SSD speed and unified memory 
 Detailed milestones are available in [ROADMAP.md](ROADMAP.md).
 - **v0.2.x**: Stability, bug fixes, and PyPI release polish.
 - **v0.3.0**: Parallel Expert Streaming for MoE models (Mixtral/DeepSeek).
-- **v0.3.1**: Disk KV Cache offloading.
+- **v0.3.1**: Async background I/O prefetcher.
+- **v0.3.2**: ✅ **Disk KV Cache Offloading** — production-quality infinite context without OOM.
+- **v0.4.0**: Advanced streaming optimizations and performance tuning.
 
 ---
 

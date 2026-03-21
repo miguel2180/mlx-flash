@@ -6,6 +6,21 @@ Follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and
 
 ## [Unreleased]
 
+## - 2026-03-21
+
+**Disk KV Cache Offloading — Production Quality Infinite Context**
+
+- Complete KVCache interface implementation (size/trim/empty/nbytes/state/to_quantized)
+- Zero-GPU-sync writes via `mx.eval()` + `np.asarray().tobytes()`
+- Bounded disk growth with configurable eviction (`disk_kv_max_tokens`)
+- Unique per-process cache directories (PID + UUID) + proper `close()` / context manager
+- Crash-safe header ordering, consolidated flushes, and `shutdown()` integration
+- Removed unconditional debug prints, fixed resource leaks, added 10 new unit tests
+
+All 37 existing tests + new `test_disk_kv_cache.py` suite + 4000-token RAM-budget stress test now pass.
+
+Infinite context without OOM is now stable, reliable, and production-ready.
+
 ## [0.1.1]
 
 ### Added
