@@ -50,15 +50,14 @@ class TestFlashRAMBudget:
         assert metal_active < 100, f"Metal active memory is {metal_active:.1f} MB. Expected < 100."
 
     def test_long_context_doesnt_oom(self, tmp_model_dir, flash_config):
-        """A 1000-token context should not OOM even with chunked prefill."""
-        flash_config.prefill_chunk_size = 32  # tiny chunks for test
-        flash_config.max_kv_size = 64
+        """A 1000-token context should not OOM even with native generation."""
+        import mlx_lm
         loop = FlashGenerationLoop(str(tmp_model_dir), flash_config)
-        # Synthesize a long "prompt" as repeated token IDs
-        long_prompt_tokens = [1] * 1000  # 1000 tokens
+        # Synthesize a long "prompt" as a string
+        prompt = "hello " * 500  # ~1000 tokens
         # Should not raise RuntimeError: [metal::malloc] Insufficient Memory
-        result = list(loop.stream_generate_from_tokens(long_prompt_tokens,
-                                                        max_new_tokens=5))
+        result = list(mlx_lm.stream_generate(loop.flash_model, loop.tokenizer, prompt,
+                                              max_tokens=5))
         assert len(result) > 0
 
     def test_per_layer_metal_memory_stays_bounded(self, tmp_model_dir, flash_config):

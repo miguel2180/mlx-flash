@@ -5,7 +5,7 @@ import pytest
 from mlx_flash.generation import FlashGenerationLoop
 
 
-@pytest.mark.real_model
+
 def test_first_token_sampling_temperature(tmp_model_dir):
     """Verify that temperature affects the first token (i.e. it's not argmax)."""
     import mlx_lm

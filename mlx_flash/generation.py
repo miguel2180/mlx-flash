@@ -8,6 +8,7 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx_lm
 from mlx.utils import tree_flatten
+from mlx_lm.models.base import create_attention_mask
 
 from .config import FlashConfig
 
@@ -23,13 +24,13 @@ class FlashLLM(nn.Module):
     
     def __init__(self, model: nn.Module, config: FlashConfig):
         super().__init__()
-        self._model = model
-        self._config = config
-        self._layers = self._find_layers(model)
-        self._n_layers = len(self._layers)
-        self._pre_layer_fn = self._build_pre_layer_fn(model)
-        self._post_layer_fn = self._build_post_layer_fn(model)
-        self.disk_cache: Any = None  # optionally set by manager
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_config", config)
+        object.__setattr__(self, "_layers", self._find_layers(model))
+        object.__setattr__(self, "_n_layers", len(self._layers))
+        object.__setattr__(self, "_pre_layer_fn", self._build_pre_layer_fn(model))
+        object.__setattr__(self, "_post_layer_fn", self._build_post_layer_fn(model))
+        object.__setattr__(self, "disk_cache", None)
     
     def _find_layers(self, model: nn.Module) -> list:
         """Find transformer layers via common attribute names."""
@@ -90,13 +91,14 @@ class FlashLLM(nn.Module):
         # Pre-layer: embedding
         h = self._pre_layer_fn(x)
         
+        # 1. Fix the Mask Problem (Correctness for prefill T > 1)
+        if mask is None and cache is not None:
+            mask = create_attention_mask(h, cache)
+            
         # Per-layer synchronous execution
+        import inspect
         for i, layer in enumerate(self._layers):
             cache_entry = cache[i] if cache is not None else None
-            
-            # Prefetch next layer's mmap pages
-            if i + 1 < self._n_layers:
-                _prefetch_layer_params(self._layers[i + 1])
             
             # Run this layer (builds a small graph for ONE layer)
             if self._is_mamba_layer(layer):
@@ -105,14 +107,15 @@ class FlashLLM(nn.Module):
                 if cache_entry is not None:
                     mx.eval(h, *cache_entry)
             else:
-                try:
+                # 2. Robust Layer Execution (inspect.signature)
+                sig = inspect.signature(layer.__call__)
+                params = sig.parameters
+                if 'mask' in params and 'cache' in params:
                     h = layer(h, mask=mask, cache=cache_entry)
-                except TypeError:
-                    # Some layers don't accept mask or cache
-                    try:
-                        h = layer(h, cache=cache_entry)
-                    except TypeError:
-                        h = layer(h)
+                elif 'cache' in params:
+                    h = layer(h, cache=cache_entry)
+                else:
+                    h = layer(h)
                 
                 # CRITICAL: materialise NOW before the next layer's graph is built
                 if cache_entry is not None:
@@ -120,28 +123,6 @@ class FlashLLM(nn.Module):
                     mx.eval(h, cache_entry.keys, cache_entry.values)
                 else:
                     mx.eval(h)
-            
-            # Disk KV Cache offloading (if enabled)
-            if self.disk_cache and cache_entry is not None and not self._is_mamba_layer(layer):
-                token_count = cache_entry.keys.shape[1]
-                if token_count > self._config.max_in_memory_kv_tokens:
-                    mid = token_count // 2
-                    keys_to_evict = cache_entry.keys[:, :mid, :]
-                    values_to_evict = cache_entry.values[:, :mid, :]
-                    self.disk_cache.evict_to_disk(i, keys_to_evict, values_to_evict, (0, mid))
-                    
-                    # ACTUAL FIX: Remove from RAM
-                    cache_entry.keys = cache_entry.keys[:, mid:, :]
-                    cache_entry.values = cache_entry.values[:, mid:, :]
-                    if hasattr(cache_entry, "offset"):
-                        cache_entry.offset -= mid
-                    if hasattr(cache_entry, "_idx"):
-                        # For RotatingKVCache, adjusting _idx is complex, 
-                        # but for simple KVCache it works.
-                        cache_entry._idx = max(0, cache_entry._idx - mid)
-                        
-                    if self._config.debug:
-                        print(f"[flash] layer {i:3d} evicted {mid} tokens to SSD and freed RAM", file=sys.stderr)
             
             # Synchronise: ensure GPU work is done before clearing cache
             mx.synchronize()
@@ -182,35 +163,15 @@ class FlashLLM(nn.Module):
     def update(self, params):
         return self._model.update(params)
 
-def _prefetch_layer_params(layer: nn.Module) -> None:
-    """Issue madvise(WILLNEED) on the mmap pages of a layer's parameters."""
-    from .page_cache import prefetch_array
-    for _, arr in tree_flatten(layer.parameters()):  # type: ignore
-        if isinstance(arr, mx.array):
-            # Note: Accessing the pointer for madvise currently triggers 
-            # implicit evaluation in MLX's buffer protocol.
-            prefetch_array(arr)
-
-class DiskKVCache:
-    """KV cache that evicts old entries to mmap'd files on SSD."""
-    
-    def __init__(self, n_layers: int, max_in_memory_tokens: int, cache_dir: str):
-        self._dir = Path(cache_dir)
-        self._dir.mkdir(exist_ok=True, parents=True)
-        self._max_in_mem = max_in_memory_tokens
-        self._n_layers = n_layers
-    
-    def evict_to_disk(self, layer_idx: int, keys: mx.array, values: mx.array, token_range: tuple[int, int]):
-        """Evict a range of KV entries to disk (safetensors format)."""
-        path = self._dir / f"layer_{layer_idx}_tokens_{token_range[0]}_{token_range[1]}.safetensors"
-        mx.save_safetensors(str(path), {"k": keys, "v": values})
-        return path
-    
-    def load_from_disk(self, layer_idx: int, token_range: tuple[int, int]):
-        """Load KV entries back from disk (lazy, mmap-backed)."""
-        path = self._dir / f"layer_{layer_idx}_tokens_{token_range[0]}_{token_range[1]}.safetensors"
-        data = mx.load(str(path))
-        return data["k"], data["v"]  # type: ignore
+    def __getattr__(self, name: str) -> Any:
+        # Don't delegate internal attributes (starting with _)
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            model = object.__getattribute__(self, "_model")
+        except AttributeError:
+            raise AttributeError(name)
+        return getattr(model, name)
 
 class FlashGenerationLoop:
     """

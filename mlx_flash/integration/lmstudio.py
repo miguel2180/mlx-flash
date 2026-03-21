@@ -8,7 +8,6 @@ _ORIGINAL_STREAM_GENERATE = None
 _ORIGINAL_GENERATE = None
 _ORIGINAL_SET_CACHE_LIMIT = None
 _ORIGINAL_SET_WIRED_LIMIT = None
-_LAST_LOOP = None
 
 def apply_flash_patch(config: FlashConfig | None = None) -> None:
     """
@@ -57,38 +56,15 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
 
     # 2. Patch stream_generate
     def _flash_stream_generate(model, tokenizer, prompt, **kwargs):
-        import collections
-
-        from ..generation import FlashGenerationLoop, FlashLLM
-        GenerationResult = collections.namedtuple("GenerationResult", ["text"])
-        
-        global _LAST_LOOP
-        
-        if isinstance(model, FlashLLM):
-            # Use the production generation loop for proper decoding and sampling
-            if not hasattr(model, "_flash_loop"):
-                model._flash_loop = FlashGenerationLoop(model, tokenizer, config)
-            loop = model._flash_loop
-            _LAST_LOOP = loop
-            for chunk in loop.stream_generate(prompt, **kwargs):
-                yield GenerationResult(text=chunk)
-        else:
-            yield from _ORIGINAL_STREAM_GENERATE(model, tokenizer, prompt, **kwargs)
+        # FlashLLM is a drop-in proxy, so we can just use the original pipeline
+        yield from _ORIGINAL_STREAM_GENERATE(model, tokenizer, prompt, **kwargs)
 
     mlx_lm.stream_generate = _flash_stream_generate  # type: ignore
 
     # 3. Patch generate
     if _ORIGINAL_GENERATE:
         def _flash_generate(model, tokenizer, prompt, **kwargs):
-            from ..generation import FlashLLM
-            if isinstance(model, FlashLLM):
-                # stream_generate now returns text
-                full_text = ""
-                for chunk in _flash_stream_generate(model, tokenizer, prompt, **kwargs):
-                    full_text += chunk.text
-                return full_text
-            else:
-                return _ORIGINAL_GENERATE(model, tokenizer, prompt, **kwargs)
+            return _ORIGINAL_GENERATE(model, tokenizer, prompt, **kwargs)
         mlx_lm.generate = _flash_generate  # type: ignore
 
 
@@ -113,9 +89,6 @@ def remove_flash_patch() -> None:
         mx.metal.set_cache_limit = _ORIGINAL_SET_CACHE_LIMIT
     if _ORIGINAL_SET_WIRED_LIMIT:
         mx.metal.set_wired_limit = _ORIGINAL_SET_WIRED_LIMIT
-        
-    if _LAST_LOOP and hasattr(_LAST_LOOP, "model") and hasattr(_LAST_LOOP.model, "manager"):
-        _LAST_LOOP.model.manager.shutdown()
     
     _ORIGINAL_LOAD = None
     _ORIGINAL_STREAM_GENERATE = None

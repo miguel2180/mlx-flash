@@ -10,12 +10,12 @@ This document outlines the planned milestones for `mlx-flash` as it moves from b
 - [ ] **Sampler Parity**: Ensure 100% numerical parity with standard `mlx-lm` for all sampling parameters.
 - [ ] **Improved Diagnostics**: More granular RAM profiling in `flash-monitor`.
 
-## v0.2.0: Asynchronous Prefetching
-*Focus: Eliminating I/O latency.*
+## v0.2.0: Background I/O & Disk KV
+*Focus: Eliminating I/O latency and handling massive contexts.*
 
-- [ ] **Background I/O Thread**: Move `madvise(WILLNEED)` to a dedicated thread to hide loading time behind GPU compute.
-- [ ] **Adaptive Budgeting**: Automatically adjust RAM limits based on real-time system pressure (pressure signals from `os_proc_available_memory`).
-- [ ] **Kernel Optimization**: Fused kernels for layer-norm and MoE dispatching to reduce overhead.
+- [ ] **Background I/O Thread**: Implement real async prefetch by parsing Safetensors headers and issuing `madvise(WILLNEED)` on a separate thread using raw file mmap.
+- [ ] **Stable Disk KV Cache**: Robust offloading and reloading of KV cache entries from SSD with full data integrity checks.
+- [ ] **Adaptive Budgeting**: Automatically adjust RAM limits based on real-time system pressure signals from the OS.
 
 ## v0.3.0: High-Performance MoE Weight Streaming
 *Focus: Making massive MoE models (Mixtral, DeepSeek) run at 10+ tok/s.*

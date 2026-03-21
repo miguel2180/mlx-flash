@@ -67,10 +67,10 @@ graph TD
 
 ### The Mechanism
 1. **Lazy Loading**: `mlx_lm.load(path, lazy=True)` maps the entire model into the unified address space using the macOS page cache. No Metal RAM is consumed at this point.
-2. **Layer Interception**: We wrap the model in a `FlashLLM` proxy that understands the layer structure of 50+ architectures (Llama, Mamba, Qwen, etc.).
+2. **Perfect Proxy**: We wrap the model in a `FlashLLM` proxy that behaves exactly like the original (same mask protocol, same cache management), but intercepts the layer loop.
 3. **Synchronous Execution**: Instead of building a unified lazy graph for the whole model (which leads to OOM), we build and evaluate a graph for exactly **one layer**.
 4. **Immediate Eviction**: After each `mx.eval()`, we verify completion and clear the Metal cache. The weights for the current layer are immediately eligible for eviction from RAM by the OS.
-5. **Prefetching**: While computing Layer $N$, we issue `madvise(WILLNEED)` on the memory region of Layer $N+1$, hiding I/O latency behind GPU computation.
+5. **Efficiency Features**: Since `FlashLLM` is a drop-in proxy, you get all native `mlx-lm` features like **quantized KV cache** (`kv_bits`) and **sliding windows** (`max_kv_size`) for free.
 
 ---
 
@@ -144,9 +144,9 @@ Benchmarked on **M4 MacBook Air 16 GB** with internal NVMe.
 ---
 
 ## Known Issues (v0.1.0)
-* **Synchronous Prefetch**: The current `madvise` prefetch hint is issued synchronously before layer execution. Future versions (0.2+) will move this to a background thread to hide I/O latency completely.
-* **Disk KV Cache (Experimental)**: Offloading the KV cache to SSD is functional but may impact performance on slower drives (e.g., external USB-C).
-* **First-Token Sampling**: In v0.1.0, the very first token of a prompt is always sampled using the sampler (temp/top_p), but subsequent chunks in very long prompts may show slight variations vs. standard MLX.
+* **Async Prefetch (Roadmap)**: v0.1.0 performs purely synchronous I/O. Future versions (0.2+) will implement background prefetching using raw file mmap offsets to completely hide I/O latency.
+* **Disk KV Cache (Roadmap)**: Stable Disk KV offloading is deferred to v0.2.0 to ensure 100% data integrity and performance.
+* **Limited Context RAM**: While weights are streamed, the KV cache still grows in RAM. Use `max_kv_size` (sliding window) or `kv_bits` (quantization) to mitigate this.
 
 ---
 
