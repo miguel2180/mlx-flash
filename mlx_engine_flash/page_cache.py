@@ -115,6 +115,33 @@ def release(mm: mmap.mmap, offset: int, length: int,
     return madvise_range(mm, offset, length, advice)
 
 
+def _get_free_pages() -> int:
+    """Returns the number of free pages via vm_stat (macOS)."""
+    if not _IS_MACOS:
+        return 0
+    try:
+        import subprocess
+        out = subprocess.check_output(["vm_stat"], encoding="utf-8")
+        for line in out.splitlines():
+            if "Pages free:" in line:
+                return int(line.split(":")[1].strip().strip("."))
+    except Exception:
+        pass
+    return 0
+
+
+def release_and_verify(mm: mmap.mmap, offset: int, length: int, strategy: str = "free") -> int:
+    """Release pages and return how many bytes were freed (best-effort).
+    Uses vm_stat parsing on macOS to check page-free events."""
+    before = _get_free_pages()
+    success = release(mm, offset, length, strategy)
+    if not success:
+        return 0
+    after = _get_free_pages()
+    page_size = os.sysconf("SC_PAGE_SIZE") if _IS_MACOS else 4096
+    return max(0, (after - before) * page_size)
+
+
 def set_sequential(mm: mmap.mmap, offset: int, length: int) -> bool:
     """Mark a region as sequentially accessed so the OS can read-ahead."""
     return madvise_range(mm, offset, length, MADV_SEQUENTIAL)

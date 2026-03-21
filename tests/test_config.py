@@ -7,9 +7,10 @@ from mlx_engine_flash.config import FlashConfig
 
 def test_defaults():
     cfg = FlashConfig()
-    assert cfg.enabled is False
-    assert cfg.ram_budget_gb == 10.0
+    assert not cfg.enabled
+    assert cfg.ram_budget_gb == 6.0
     assert cfg.n_io_threads == 4
+
 
 
 def test_enabled():

@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from .config import FlashConfig
-from .page_cache import prefetch, release, set_sequential
+from .page_cache import prefetch, release, set_sequential, release_and_verify
 
 
 # ── dtype mapping: safetensors dtype string → numpy dtype ─────────────────
@@ -263,11 +263,19 @@ class WeightStreamer:
                 prefetch(mm, entry.data_offset, entry.data_length)
 
     def release_layer(self, layer_idx: int) -> None:
+        total_freed = 0
         for name in self.index.layer_tensor_names(layer_idx):
             entry = self.index._entries.get(name)
             if entry:
                 mm = self.index.get_mmap(entry.file_path)
-                release(mm, entry.data_offset, entry.data_length, self.config.eviction_strategy)
+                if self.config.debug:
+                    total_freed += release_and_verify(mm, entry.data_offset, entry.data_length, self.config.eviction_strategy)
+                else:
+                    release(mm, entry.data_offset, entry.data_length, self.config.eviction_strategy)
+        
+        if self.config.debug and total_freed > 0:
+            import sys
+            print(f"[flash] Layer {layer_idx} released: {total_freed / 1024 / 1024:.2f} MB", file=sys.stderr)
 
     def _decode(self, entry: TensorEntry, mm: mmap.mmap) -> np.ndarray:
         """Returns a zero-copy NumPy array slicing into the mmap."""
