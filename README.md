@@ -59,10 +59,15 @@ Standard MLX uses "lazy graph evaluation," which attempts to build a massive gra
 - **High-Precision KV Cache**: `DiskKVCache` stores context on your SSD at full precision, avoiding the logic degradation common in 4-bit KV cache implementations.
 - **Deterministic Sampling**: Supports the full `mlx-lm` sampling suite with perfect reproducibility.
 
-- **Speed/Memory Tradeoff**: Use `FlashConfig(ram_budget_gb=...)` to keep as many layers "hot" in your real RAM as possible. 
-  - **Set to 2.0**: "Slow but Invincible" (Extreme weight streaming, fits 70B on 8GB Mac).
-  - **Set to 12.0**: "Balanced" (Caches half the model in RAM for a 2-4x speedup).
-  - **Set to 32.0+**: "Full Speed" (Only streams if you actually run out of RAM).
+### 2. The Master Dial: `ram_budget_gb` 📈
+Flash Mode is a hybrid engine. You control exactly how much RAM is traded for speed.
+
+- **Safety Profile (1.0 - 2.0 GB)**: "Slow but Invincible." Streams almost every layer from SSD. Recommended if you are multi-tasking or have limited RAM.
+- **Balanced Profile (4.0 - 8.0 GB)**: Caches ~50% of a 30B model in RAM for a 2-4x speedup. Requires closing other heavy apps.
+- **Performance Profile (12.0+ GB)**: Keeps most of the model in RAM. Maximum speed, only uses Flash Mode for the "overflow."
+
+> [!TIP]
+> **If your model is "Killed" (Exit code 137)**: This means your `ram_budget_gb` + OS overhead exceeded your physical RAM. Lower the budget by 1.0 GB and restart.
 
 ### 3. Infinite Context (Disk KV Cache) ♾️
 - **Bottomless Window**: Your prompt size is limited only by your SSD free space, not your RAM.
@@ -221,7 +226,10 @@ from mlx_flash.integration.lmstudio import apply_flash_patch
 import mlx_lm
 
 # 1. Enable Flash Mode system-wide for mlx_lm
-apply_flash_patch(FlashConfig(enabled=True, ram_budget_gb=10.0))
+# ram_budget_gb is your "Master Dial":
+# - 1.5: Safe (Works even if RAM is full)
+# - 8.0: Performance (Requires free RAM)
+apply_flash_patch(FlashConfig(enabled=True, ram_budget_gb=2.0))
 
 # 2. Load any model (e.g., Llama-3-70B on 16GB RAM)
 model, tokenizer = mlx_lm.load("mlx-community/Meta-Llama-3-70B-Instruct-4bit")
