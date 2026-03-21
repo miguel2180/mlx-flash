@@ -67,7 +67,7 @@ class TestFlashRAMBudget:
         """
         import shutil
         from pathlib import Path
-        import mlx_lm
+
         
         cfg = FlashConfig(
             enabled=True, 

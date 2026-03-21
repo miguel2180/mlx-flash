@@ -1,7 +1,6 @@
 """Unit tests for DiskKVCache — the disk-backed infinite context KV cache."""
 
 import shutil
-import sys
 from pathlib import Path
 
 import mlx.core as mx
@@ -37,7 +36,7 @@ class TestUpdateAndFetchShapes:
 
     def test_multiple_tokens_accumulate(self, kv_dir):
         cache = DiskKVCache(layer_idx=0, cache_dir=kv_dir)
-        for i in range(5):
+        for _ in range(5):
             k, v = _make_kv(seq=1)
             out_k, out_v = cache.update_and_fetch(k, v)
         assert out_k.shape == (1, 4, 5, 64)

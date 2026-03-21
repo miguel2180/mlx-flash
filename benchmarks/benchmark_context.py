@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import time
-import os
 import gc
 import json
-import struct
 import shutil
+import time
 from pathlib import Path
-import numpy as np
+
 import mlx.core as mx
 import psutil
-from mlx_flash import FlashConfig, FlashManager, FlashGenerationLoop
+
+from mlx_flash import FlashConfig, FlashGenerationLoop
+
 
 def get_rss_mb():
     # Resident Set Size (Physical RAM)
@@ -78,10 +78,9 @@ def run_benchmark_iter(model_path: Path, context_len: int, disk_kv: bool):
     # 1. MEASURE PREFILL
     # We generate exactly 1 token to trigger the prefill of the context_len
     gen = loop.stream_generate(prompt, max_tokens=1)
-    try:
+    import contextlib
+    with contextlib.suppress(StopIteration):
         next(gen)
-    except StopIteration:
-        pass
     
     t_prefill = time.monotonic() - t0
     prefill_ts = context_len / t_prefill if t_prefill > 0 else 0

@@ -55,15 +55,16 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
         return model, tokenizer
 
     # Patch GENERATE for Disk KV injection
-    _ORIGINAL_STREAM_GEN = mlx_lm.stream_generate
-    _ORIGINAL_GEN = mlx_lm.generate
+    original_stream_gen = mlx_lm.stream_generate
+    original_gen = mlx_lm.generate
 
     def _flash_stream_generate(*args, **kwargs):
         model = args[0] if len(args) > 0 else kwargs.get("model")
         if hasattr(model, "manager") and config.disk_kv_enabled:
             # Inject Disk KV
-            from ..disk_kv_cache import DiskKVCache
             from mlx_lm.models.cache import make_prompt_cache
+
+            from ..disk_kv_cache import DiskKVCache
             
             if "prompt_cache" not in kwargs:
                 # We need to create the cache ourselves to use DiskKVCache
@@ -75,8 +76,8 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
                 max_tokens = config.kv_keep if config.kv_keep > 0 else None
                 
                 # 2. Only replace Attention-style caches (KVCache) with DiskKVCache
+
                 from ..disk_kv_cache import DiskKVCache
-                from mlx_lm.models.cache import KVCache
                 
                 final_cache = []
                 for i, c in enumerate(native_cache):
@@ -90,11 +91,11 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
                 
                 kwargs["prompt_cache"] = final_cache
                 
-        return _ORIGINAL_STREAM_GEN(*args, **kwargs)
+        return original_stream_gen(*args, **kwargs)
 
     mlx_lm.load = _flash_load  # type: ignore
     mlx_lm.stream_generate = _flash_stream_generate # type: ignore
-    mlx_lm.generate = _ORIGINAL_GEN # type: ignore
+    mlx_lm.generate = original_gen # type: ignore
 
 
 def remove_flash_patch() -> None:

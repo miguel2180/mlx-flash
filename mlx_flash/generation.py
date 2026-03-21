@@ -9,10 +9,9 @@ from typing import Any
 import mlx.core as mx
 import mlx.nn as nn
 import mlx_lm
-from mlx_lm.models.base import create_attention_mask
 
-from .config import FlashConfig
 from . import page_cache
+from .config import FlashConfig
 
 
 class FlashLLM(nn.Module):
@@ -71,7 +70,6 @@ class FlashLLM(nn.Module):
         if self._model_path is None:
             return [[] for _ in range(self._n_layers)]
         
-        import glob
         import json
         import struct
         
@@ -149,7 +147,7 @@ class FlashLLM(nn.Module):
         
         # Collect fresh lazy weights from our token-local cache
         fresh_weights = []
-        for sf_path, keys in entries:
+        for _sf_path, keys in entries:
             for key in keys:
                 if key in all_lazy:
                     # Strip the prefix to get the local name (e.g., "mixer.weight")
@@ -472,34 +470,34 @@ class FlashGenerationLoop:
         kwargs["sampler"] = make_sampler(**sampler_args)
 
         # Inject DiskKVCache if enabled
-        if getattr(self.config, "disk_kv_enabled", False):
-            if "prompt_cache" not in kwargs:
-                from mlx_flash.disk_kv_cache import DiskKVCache
-                import shutil
-                import tempfile
-                import uuid
+        if getattr(self.config, "disk_kv_enabled", False) and "prompt_cache" not in kwargs:
+            import shutil
+            import tempfile
+            import uuid
 
-                kv_dir_cfg = getattr(self.config, "disk_kv_dir", "")
-                if kv_dir_cfg:
-                    kv_dir = Path(kv_dir_cfg)
-                else:
-                    kv_dir = Path(tempfile.gettempdir()) / f"mlx_flash_kv_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+            from mlx_flash.disk_kv_cache import DiskKVCache
 
-                # Wipe old cache to ensure clean context
-                if kv_dir.exists():
-                    shutil.rmtree(kv_dir, ignore_errors=True)
-                kv_dir.mkdir(parents=True, exist_ok=True)
+            kv_dir_cfg = getattr(self.config, "disk_kv_dir", "")
+            if kv_dir_cfg:
+                kv_dir = Path(kv_dir_cfg)
+            else:
+                kv_dir = Path(tempfile.gettempdir()) / f"mlx_flash_kv_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 
-                max_tokens = getattr(self.config, "disk_kv_max_tokens", None)
+            # Wipe old cache to ensure clean context
+            if kv_dir.exists():
+                shutil.rmtree(kv_dir, ignore_errors=True)
+            kv_dir.mkdir(parents=True, exist_ok=True)
 
-                # Build the array of DiskKVCaches
-                prompt_cache = [DiskKVCache(layer_idx=i, cache_dir=str(kv_dir), max_tokens=max_tokens)
-                              for i in range(self.flash_model._n_layers)]
-                kwargs["prompt_cache"] = prompt_cache
-                self._disk_kv_caches = prompt_cache
+            max_tokens = getattr(self.config, "disk_kv_max_tokens", None)
 
-                if self.config.debug:
-                    print(f"[flash] Injected {len(prompt_cache)} DiskKVCache layers at {kv_dir}", file=sys.stderr)
+            # Build the array of DiskKVCaches
+            prompt_cache = [DiskKVCache(layer_idx=i, cache_dir=str(kv_dir), max_tokens=max_tokens)
+                          for i in range(self.flash_model._n_layers)]
+            kwargs["prompt_cache"] = prompt_cache
+            self._disk_kv_caches = prompt_cache
+
+            if self.config.debug:
+                print(f"[flash] Injected {len(prompt_cache)} DiskKVCache layers at {kv_dir}", file=sys.stderr)
 
         for result in mlx_lm.stream_generate(
             self.flash_model, self.tokenizer, prompt,

@@ -19,7 +19,6 @@ class FlashManager:
 
     def _check_spotlight_warning(self, model_path: Path):
         """Warn users if Spotlight indexing might degrade Flash performance, and auto-exclude."""
-        import os
         # Auto-exclude model directory from Spotlight
         metadata_file = model_path / ".metadata_never_index"
         if not metadata_file.exists():
@@ -36,10 +35,9 @@ class FlashManager:
             print("[flash]        We've attempted to auto-exclude the model directory via a .metadata_never_index file.")
             print("[flash]        If you still experience lag, explicitly add your models directory to:")
             print("[flash]        System Settings -> Siri & Spotlight -> Spotlight Privacy\n")
-            try:
+            import contextlib
+            with contextlib.suppress(Exception):
                 flag_file.touch()
-            except Exception:
-                pass
 
     def _check_battery_warning(self):
         """Warn users if they are running heavy IO workloads on battery power."""
@@ -136,12 +134,10 @@ class FlashManager:
                 setter = mx.metal.set_wired_limit
             setter(0)
 
-        # 3. Clear model and tokenizer references to allow GC
         if hasattr(self.model, 'mmap_cache') and self.model.mmap_cache:
-            try:
+            import contextlib
+            with contextlib.suppress(Exception):
                 self.model.mmap_cache.shutdown()
-            except Exception:
-                pass
         self.model = None
         self.tokenizer = None
         

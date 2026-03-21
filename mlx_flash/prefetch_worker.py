@@ -1,7 +1,9 @@
+import contextlib
 import os
 import queue
 import threading
 from typing import Any
+
 
 class BackgroundPrefetcher:
     """
@@ -29,7 +31,7 @@ class BackgroundPrefetcher:
     def _worker(self):
         # 16MB chunking provides excellent sustained SSD queue depth
         # without starving other system processes
-        CHUNK_SIZE = 16 * 1024 * 1024 
+        chunk_size = 16 * 1024 * 1024 
         
         while self.running:
             try:
@@ -49,7 +51,7 @@ class BackgroundPrefetcher:
                     while curr < end and self.running:
                         try:
                             # os.pread explicitly releases the GIL
-                            chunk = min(CHUNK_SIZE, end - curr)
+                            chunk = min(chunk_size, end - curr)
                             os.pread(fd, chunk, curr)
                             curr += chunk
                         except Exception:
@@ -66,12 +68,10 @@ class BackgroundPrefetcher:
     def enqueue(self, filename: str, offset: int, length: int):
         if not self.running:
             return
-        try:
+        with contextlib.suppress(queue.Full):
             # Non-blocking put to avoid main thread getting stuck
             # if the SSD queue is backed up
             self.queue.put_nowait((filename, offset, length))
-        except queue.Full:
-            pass
 
     def shutdown(self):
         self.running = False

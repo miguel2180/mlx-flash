@@ -1,10 +1,10 @@
+import contextlib
 import json
 import struct
 from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
-
 from mlx_lm.models.cache import KVCache
 
 
@@ -51,6 +51,7 @@ class DiskKVCache(KVCache):
         self.bytes_per_elem = 2
         self._max_tokens = max_tokens
         self._closed = False
+        self._exit_stack = contextlib.ExitStack()
 
         # Satisfy KVCache contract: keys/values are None until first update
         self.keys = None
@@ -65,10 +66,9 @@ class DiskKVCache(KVCache):
         self._closed = True
         for fd in (self.fd_k, self.fd_v):
             if fd is not None:
-                try:
+                with contextlib.suppress(Exception):
                     fd.close()
-                except Exception:
-                    pass
+        self._exit_stack.close()
         self.fd_k = None
         self.fd_v = None
 
@@ -80,16 +80,14 @@ class DiskKVCache(KVCache):
         return False
 
     def __del__(self):
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
     # ── File Setup ──────────────────────────────────────────────────────────
 
     def _init_files(self, k_shape, v_shape, dtype):
-        self.fd_k = open(self.k_path, "wb+")
-        self.fd_v = open(self.v_path, "wb+")
+        self.fd_k = self._exit_stack.enter_context(open(self.k_path, "wb+"))  # noqa: SIM115
+        self.fd_v = self._exit_stack.enter_context(open(self.v_path, "wb+"))  # noqa: SIM115
 
         # Force F32 for disk storage to avoid NumPy/MLX buffer protocol issues
         # with float16/bfloat16.
@@ -221,8 +219,9 @@ class DiskKVCache(KVCache):
 
         # 6. Transpose back into expected MLX format [Batch, Heads, TotalSeq, HeadDim]
         # This is a purely metadata zero-copy operation in MLX
-        self.keys = lazy_k_t.transpose(1, 2, 0, 3)
-        self.values = lazy_v_t.transpose(1, 2, 0, 3)
+        # We also cast back to the input dtype!
+        self.keys = lazy_k_t.transpose(1, 2, 0, 3).astype(keys.dtype)
+        self.values = lazy_v_t.transpose(1, 2, 0, 3).astype(values.dtype)
 
         return self.keys, self.values
 
@@ -257,10 +256,11 @@ class DiskKVCache(KVCache):
             self.fd_v.flush()
             # Reload trimmed arrays
             if self.offset > 0:
+                dtype = self.keys.dtype if self.keys is not None else mx.float16
                 lazy_k_t = mx.load(str(self.k_path))["keys"]
                 lazy_v_t = mx.load(str(self.v_path))["values"]
-                self.keys = lazy_k_t.transpose(1, 2, 0, 3)
-                self.values = lazy_v_t.transpose(1, 2, 0, 3)
+                self.keys = lazy_k_t.transpose(1, 2, 0, 3).astype(dtype)
+                self.values = lazy_v_t.transpose(1, 2, 0, 3).astype(dtype)
             else:
                 self.keys = None
                 self.values = None
@@ -274,7 +274,9 @@ class DiskKVCache(KVCache):
         if self.keys is None or self.k_shape is None:
             return 0
         # Per token: B * H * D * bytes_per_elem * 2 (keys + values)
-        per_token = self.k_shape[0] * self.k_shape[1] * self.k_shape[3] * self.bytes_per_elem
+        # Use logical bytes per element from keys.dtype
+        logical_bytes = 4 if self.keys.dtype == mx.float32 else 2
+        per_token = self.k_shape[0] * self.k_shape[1] * self.k_shape[3] * logical_bytes
         return self.offset * per_token * 2
 
     def to_quantized(self, group_size: int = 64, bits: int = 4):

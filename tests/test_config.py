@@ -16,7 +16,7 @@ def test_enabled():
 
 def test_validation_ram():
     with pytest.raises(ValueError, match="ram_budget_gb"):
-        FlashConfig(ram_budget_gb=0.1)
+        FlashConfig(ram_budget_gb=0.05)
 
 def test_from_dict():
     cfg = FlashConfig.from_dict({

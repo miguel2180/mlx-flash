@@ -1,11 +1,12 @@
+import contextlib
 import json
 import mmap
-import os
 import struct
 from pathlib import Path
 from typing import Any
 
 from .prefetch_worker import BackgroundPrefetcher
+
 
 class SafetensorsMmapCache:
     """
@@ -27,8 +28,7 @@ class SafetensorsMmapCache:
             return
 
         for sf in safetensor_files:
-            try:
-                f = open(sf, "rb")
+            with contextlib.suppress(Exception), open(sf, "rb") as f:
                 self.file_handles[sf.name] = f
                 
                 # Safetensors header format: 8-byte little-endian uint64 length of JSON header
@@ -58,9 +58,6 @@ class SafetensorsMmapCache:
                         abs_end = headers_end + offsets[1]
                         self.tensor_locations[tensor_name] = (mm, abs_start, abs_end, sf.name)
                         
-            except Exception as e:
-                # If a file fails to load, we skip it.
-                continue
 
     def get_tensor_range(self, tensor_name: str) -> tuple[mmap.mmap, int, int] | None:
         """Return the (mmap_obj, absolute_start, absolute_end) for a given tensor."""
@@ -107,15 +104,11 @@ class SafetensorsMmapCache:
         if hasattr(self, 'prefetch_worker'):
             self.prefetch_worker.shutdown()
         for mm in self.file_mmaps.values():
-            try:
+            with contextlib.suppress(Exception):
                 mm.close()
-            except Exception:
-                pass
         for f in self.file_handles.values():
-            try:
+            with contextlib.suppress(Exception):
                 f.close()
-            except Exception:
-                pass
         self.file_mmaps.clear()
         self.file_handles.clear()
         self.tensor_locations.clear()

@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-import time
-import os
 import gc
 import json
+import os
 import struct
+import time
 from pathlib import Path
-import numpy as np
+
 import mlx.core as mx
+import numpy as np
 import psutil
+
 from mlx_flash import FlashConfig, FlashManager
+
 
 def pack_q4_0_block(scale: float, values: list) -> bytes:
     scale_bytes = struct.pack("<e", scale)
@@ -134,12 +137,12 @@ if __name__ == "__main__":
     t0 = time.time()
     tokens_gen = 0
     import mlx_lm
-    for chunk in mlx_lm.stream_generate(loop.flash_model, tok, "Hello world", max_tokens=10):
+    for _chunk in mlx_lm.stream_generate(loop.flash_model, tok, "Hello world", max_tokens=10):
         tokens_gen += 1
         print(f"    [Token {tokens_gen}] System RAM Overhead: {get_ram_mb() - rss_baseline:.1f} MB | Metal VRAM: {mx.metal.get_active_memory() / 1e6:.1f} MB")
     total_time = time.time() - t0
     
-    print(f"\n[+] Finished Generation!")
+    print("\n[+] Finished Generation!")
     print(f"    Speed: {tokens_gen / total_time:.1f} tok/s")
     print(f"    Final Metal VRAM: {mx.metal.get_active_memory() / 1e6:.1f} MB (Stays well under 1GB!)")
     
