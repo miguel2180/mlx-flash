@@ -15,9 +15,9 @@ def get_metal_stats() -> dict:
     try:
         import mlx.core as mx
         return {
-            "active_mb": mx.metal.get_active_memory() / 1e6,
-            "peak_mb": mx.metal.get_peak_memory() / 1e6,
-            "cache_mb": mx.metal.get_cache_memory() / 1e6,
+            "active_mb": mx.get_active_memory() / 1e6,
+            "peak_mb": mx.get_peak_memory() / 1e6,
+            "cache_mb": mx.get_cache_memory() / 1e6,
         }
     except (AttributeError, ImportError):
         return {"active_mb": -1, "peak_mb": -1, "cache_mb": -1}
