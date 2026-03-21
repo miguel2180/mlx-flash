@@ -148,13 +148,25 @@ def tmp_model_dir(tmp_path_factory):
         "intermediate_size": inter,
         "num_hidden_layers": 2,
         "num_attention_heads": 4,
+        "rms_norm_eps": 1e-6,
         "vocab_size": 256,
     }
     (mdir / "config.json").write_text(json.dumps(cfg))
 
-    # Minimal tokenizer
-    (mdir / "tokenizer.json").write_text(json.dumps({"version": "1.0", "model": {"type": "bpe"}}))
-    (mdir / "tokenizer_config.json").write_text(json.dumps({}))
+    # Minimal valid tokenizer.json for Transformers
+    tok_cfg = {
+        "version": "1.0",
+        "truncation": None,
+        "padding": None,
+        "added_tokens": [],
+        "model": {
+            "type": "BPE",
+            "vocab": {"<unk>": 0, "<s>": 1, "</s>": 2},
+            "merges": []
+        }
+    }
+    (mdir / "tokenizer.json").write_text(json.dumps(tok_cfg))
+    (mdir / "tokenizer_config.json").write_text(json.dumps({"bos_token": "<s>", "eos_token": "</s>"}))
 
     return mdir
 

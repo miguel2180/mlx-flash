@@ -337,6 +337,14 @@ pip install -e ".[dev,metal]"
 - mlx-lm ≥ 0.20
 - `mlx-engine` (lmstudio-ai/mlx-engine) installed alongside
 
+### Compatibility Matrix
+
+| Library | Version | Note |
+|---------|---------|------|
+| **mlx-lm** | ≥ 0.20.0 | Required for `lazy` evaluation and model registry support. |
+| **mlx** | ≥ 0.20.0 | Required for stable `mmap` support and Metal performance. |
+| **macOS** | ≥ 14.0 | Recommended for `MADV_FREE` support (aggressive RAM recovery). |
+
 ### Uninstallation
 
 To cleanly remove `mlx-flash` and its compiled artifacts:

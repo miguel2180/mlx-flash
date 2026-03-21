@@ -5,6 +5,7 @@ import json
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -75,6 +76,10 @@ class FlashModelLoader:
     def n_layers(self) -> int:
         return self._n_layers
 
+    @property
+    def is_moe(self) -> bool:
+        return self._is_moe
+
     def open(self) -> FlashModelLoader:
         self._validate_quant()
         self._streamer = WeightStreamer(self.model_dir, self.config)
@@ -104,6 +109,15 @@ class FlashModelLoader:
                     )
 
         return self._streamer.stream_tensors(names, prefetch_names or None)
+
+    def get_non_layer_weights(self) -> dict[str, np.ndarray]:
+        """Return weights that are NOT part of any transformer layer (embeddings, norm, head)."""
+        assert self._streamer is not None
+        idx = self._streamer.index
+        layer_pfx = idx._layer_prefix.split(".0.")[0]
+        # Heuristic: anything without "layers." in it
+        names = [n for n in idx.tensor_names() if "layers." not in n]
+        return self._streamer.stream_tensors(names)
 
     def iter_layers(self) -> Iterator[tuple[int, dict[str, np.ndarray]]]:
         assert self._streamer is not None

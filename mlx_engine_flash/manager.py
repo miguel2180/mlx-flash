@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import gc
+import importlib
 import os
 import psutil
 import time
@@ -11,22 +12,50 @@ from typing import Any, Generator
 try:
     import mlx.core as mx
     import mlx.nn as nn
+    from mlx.utils import tree_flatten
     _HAS_MLX = True
 except ImportError:
     _HAS_MLX = False
 
-try:
-    import mlx_lm
-    from mlx_lm.utils import generate_step
-    from mlx_lm.models import cache as cache_utils
-    _HAS_MLX_LM = True
-except ImportError:
-    _HAS_MLX_LM = False
+import mlx_lm
+from mlx_lm.utils import load_config, hf_repo_to_path, load_tokenizer
+from mlx_lm.generate import generate_step
+from mlx_lm.models import cache as cache_utils
 
 from .config import FlashConfig
 from .loader import FlashModelLoader, _update_model_weights
 from .prefetch import WeightPrefetcher
 from .streamer import WeightStreamer
+
+def _load_skeleton_only(model_path: str):
+    """Load model architecture with NO weights. Returns (model, tokenizer)."""
+    if not Path(model_path).exists():
+        model_path = Path(hf_repo_to_path(model_path))
+    else:
+        model_path = Path(model_path)
+    
+    config = load_config(model_path)
+    
+    # Use the same logic as mlx_lm.utils.load_model but skip weight loading
+    from mlx_lm.utils import _get_classes
+    
+    if (model_file := config.get("model_file")) is not None:
+        spec = importlib.util.spec_from_file_location(
+            "custom_model",
+            model_path / model_file,
+        )
+        arch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(arch)
+        model_class, model_args_class = arch.Model, arch.ModelArgs
+    else:
+        model_class, model_args_class = _get_classes(config=config)
+
+    model_args = model_args_class.from_dict(config)
+    model = model_class(model_args)
+    model.eval()
+    
+    tokenizer = load_tokenizer(model_path)
+    return model, tokenizer
 
 class FlashManager:
     """
@@ -42,33 +71,16 @@ class FlashManager:
         self._metrics: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
         self._shared_dummy = mx.array(0.0, dtype=mx.float16)
 
-    def load(self, model_path: str, load_fn: Any | None = None, **mlx_lm_kwargs: Any) -> tuple[Any, Any]:
-        import mlx_lm
-        if load_fn is None: load_fn = mlx_lm.load
-
+    def load(self, model_path: str, **kwargs: Any) -> tuple[Any, Any]:
         self.config.validate()
         model_dir = Path(model_path)
         
         # 1. LOCK DOWN ENVIRONMENT
         os.environ["MLX_MEMORY_MAPPING"] = "0"
         
-        # 2. SKELETON LOAD (Small Dummies to bypass Metal checks)
-        original_mx_load = mx.load
-        def _dummy_load(*args, **kwargs):
-            w = original_mx_load(*args, **kwargs)
-            return { k: mx.array([0.0], v.dtype) for k, v in w.items() }
-        
-        original_load_weights = nn.Module.load_weights
-        nn.Module.load_weights = lambda self, weights, strict=False: self
-        
-        _log("Building tiny-weight skeleton...")
-        mx.load = _dummy_load
-        try:
-            mlx_lm_kwargs["lazy"] = True
-            model, tokenizer = load_fn(str(model_dir), **mlx_lm_kwargs)
-        finally:
-            mx.load = original_mx_load
-            nn.Module.load_weights = original_load_weights
+        # 2. SKELETON LOAD (No weights loaded from disk)
+        _log("Building architecture-only skeleton...")
+        model, tokenizer = _load_skeleton_only(str(model_dir))
 
         # 3. SETUP FLASH ASSETS
         self._loader = FlashModelLoader(model_dir, self.config).__enter__()
@@ -174,7 +186,7 @@ class FlashManager:
             
         prompt_cache = self._chunked_prefill(model, tokens, chunk_size=32)
 
-        from mlx_lm.utils import generate_step
+        from mlx_lm.generate import generate_step
         for response in generate_step(mx.array([], dtype=mx.uint32)[None], model, tokenizer=tokenizer, prompt_cache=prompt_cache, **kwargs):
             yield response
             mx.synchronize()

@@ -42,7 +42,7 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
         should_flash = _should_use_flash(model, config)
         if not should_flash:
             return _ORIGINAL_LOAD(model, *args, **kwargs)
-        return _MANAGER.load(model, load_fn=_ORIGINAL_LOAD, **kwargs)
+        return _MANAGER.load(model, **kwargs)
 
     mlx_lm.load = _patched_load
 
