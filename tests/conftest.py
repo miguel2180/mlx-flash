@@ -170,7 +170,5 @@ def flash_config():
     return FlashConfig(
         enabled=True,
         ram_budget_gb=2.0,
-        n_io_threads=2,
-        prefetch_layers=1,
         debug=True,
     )

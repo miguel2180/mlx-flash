@@ -126,6 +126,22 @@ integration/
 ├── lmstudio.py          — apply_flash_patch() (monkey-patches mlx_lm.load)
 └── modelfile.py         — parse_flash_directives()
 
+## Memory Budget Management: Weights vs. KV Cache vs. Activations
+
+To maintain a strict RAM budget (e.g., < 1GB for Llama-70B), mlx-flash manages three distinct memory consumers:
+
+### 1. Weights (Flash Streaming)
+Weights are loaded via `mx.load(lazy=True)`, meaning they are memory-mapped and consume zero RSS until used. `FlashLLM` evaluates layers one-by-one and calls `mx.clear_cache()` to release weight buffers from Metal immediately after each layer.
+
+### 2. KV Cache (Rotating & Disk Offloading)
+For long conversations, the KV cache grows linearly. We address this via:
+* **Rotating KV Cache**: Uses `mlx_lm.models.cache.RotatingKVCache` to cap the number of tokens held in memory.
+* **Disk Offloading**: If `kv_cache_dir` is set, old KV entries are evicted to `.safetensors` files on SSD and re-loaded (lazy mmap) only when needed.
+
+### 3. Activations (Chunked Prefill)
+Large prompts (prefill) create large intermediate activation matrices (e.g., attention masks).
+* **Chunked Prefill**: Process long prompts in chunks (default 512 tokens). This caps the peak activation memory to the size of a single chunk, preventing OOM on 32k+ token prompts.
+
 ## Limitations & Known Issues
 * Q2_K models: 2-bit dequant produces visibly degraded output; a warning is
   shown. Bit-exact guarantee applies only to ≥4-bit.

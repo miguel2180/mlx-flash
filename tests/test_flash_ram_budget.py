@@ -45,8 +45,20 @@ class TestFlashRAMBudget:
         assert rss_increase < 600, f"Peak RSS increase was {rss_increase:.1f} MB, expected < 600 MB"
         
         # Verify Metal cache was actually cleared
-        metal_active = mx.metal.get_active_memory() / 1e6
+        metal_active = mx.get_active_memory() / 1e6
         assert metal_active < 100, f"Metal active memory is {metal_active:.1f} MB. Expected < 100."
+
+    def test_long_context_doesnt_oom(self, tmp_model_dir, flash_config):
+        """A 1000-token context should not OOM even with chunked prefill."""
+        flash_config.prefill_chunk_size = 32  # tiny chunks for test
+        flash_config.max_kv_size = 64
+        loop = FlashGenerationLoop(str(tmp_model_dir), flash_config)
+        # Synthesize a long "prompt" as repeated token IDs
+        long_prompt_tokens = [1] * 1000  # 1000 tokens
+        # Should not raise RuntimeError: [metal::malloc] Insufficient Memory
+        result = list(loop.stream_generate_from_tokens(long_prompt_tokens,
+                                                        max_new_tokens=5))
+        assert len(result) > 0
 
     def test_per_layer_metal_memory_stays_bounded(self, tmp_model_dir, flash_config):
         """

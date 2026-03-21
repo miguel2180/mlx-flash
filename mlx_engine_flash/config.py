@@ -50,14 +50,18 @@ class FlashConfig:
 
     enabled: bool = False
     ram_budget_gb: float = 2.0
-    debug: bool = False
-    min_quant_bits: int = 4
-    strict_quant: bool = False
     eviction_strategy: Literal["dontneed", "free", "none"] = "free"
     metal_kernels: bool = True
     expert_cache_size: int = 8  # Number of experts to keep in LRU cache
     strict_guardrails: bool = True   # Set False only for tiny models / testing
     debug: bool = False
+
+    # KV Cache & Prefill Memory Management
+    max_kv_size: Optional[int] = None           # None = unlimited; 4096 = safe for 16GB
+    kv_keep: int = 250                          # tokens to keep during rotation
+    prefill_chunk_size: int = 512              # tokens per prefill chunk; 0 = no chunking
+    kv_cache_dir: Optional[str] = None         # If set, enable disk KV cache
+    max_in_memory_kv_tokens: int = 2048        # evict to disk above this
 
     # Derived / auto-detected — not set by user
     _n_cpu_cores: int = field(default_factory=lambda: os.cpu_count() or 4,
@@ -66,10 +70,10 @@ class FlashConfig:
     def validate(self) -> None:
         if self.ram_budget_gb < 2.0:
             raise ValueError("ram_budget_gb must be >= 2.0 GB")
-        if not (1 <= self.n_io_threads <= 32):
-            raise ValueError("n_io_threads must be between 1 and 32")
-        if self.prefetch_layers < 0:
-            raise ValueError("prefetch_layers must be >= 0")
+        if self.prefill_chunk_size < 0:
+            raise ValueError("prefill_chunk_size must be >= 0")
+        if self.kv_keep < 0:
+            raise ValueError("kv_keep must be >= 0")
 
     @classmethod
     def from_dict(cls, d: dict) -> FlashConfig:
