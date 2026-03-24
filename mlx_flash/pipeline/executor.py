@@ -78,65 +78,121 @@ class PipelinedExecutor:
         mlp_module = getattr(layer, "mlp", getattr(layer, "mixer", None))
         
         if mlp_module is not None and hasattr(mlp_module, "gate"):
+            seq_len = h.shape[1] if len(h.shape) > 1 else 1
+            
             # 1. GPU: Compute Router Logits
             router = mlp_module.gate
-            # We assume router is either nn.Linear or a custom module with a weight
             if hasattr(router, "weight"):
                 logits = mx.matmul(h, router.weight.T)
                 if hasattr(router, "bias") and router.bias is not None:
                     logits = logits + router.bias
             else:
-                logits = router(h) # Fallback if it's more complex
+                logits = router(h)
                 
-            # Force router sync to unblock CPU
             mx.eval(logits)
             
-            # 2. CPU: Determine Top-K
-            # In MLX, taking the argmax directly evaluates it.
-            import numpy as np
-            # Convert to numpy to break MLX computation graph safely for indices
-            # shape typically [batch, seq_len, num_experts]
-            # for streaming decode, seq_len is 1: [1, 1, num_experts]
-            np_logits = np.array(logits) 
-            
-            # Simple top-K logic for Python side
             top_k = getattr(mlp_module, "num_experts_per_tok", getattr(mlp_module.config, "num_experts_per_tok", 2))
             
-            # Flatten to 1D assuming batch=1, seq=1 for pure token generation.
-            # If prompt processing, this logic must handle multiple tokens.
-            flat_logits = np_logits.flatten()
-            
-            # Use argpartition for fast top-k
-            if len(flat_logits) > top_k:
-                top_indices = np.argpartition(flat_logits, -top_k)[-top_k:]
-                # Sort the top-k to match standard behaviour (highest first)
-                top_indices = top_indices[np.argsort(flat_logits[top_indices])[::-1]]
-            else:
-                top_indices = np.arange(len(flat_logits))
+            if seq_len == 1:
+                # ========================================================
+                # FAST PATH: Single Token Decode (Streaming)
+                # ========================================================
+                import numpy as np
+                np_logits = np.array(logits) 
+                flat_logits = np_logits.flatten()
                 
-            active_experts = top_indices.tolist()
-            
-            # 3. IO: Enqueue the strictly required experts immediately
-            moe_prefetcher.update_history(layer_idx, active_experts)
-            
-            # Extract file mapping (assuming mmap_cache knows about experts)
-            # In a real system, the Safetensors cache would need an `enqueue_expert` method
-            # that resolves "mlp.experts.N.weight" to a byte range.
-            for exp_idx in active_experts:
-                 # Check cache first
-                 if moe_prefetcher.cache.get(layer_idx, exp_idx) is None:
-                     # Simulate queuing specific expert
-                     self._enqueue_tensor(layer_idx, f"experts.{exp_idx}")
-                     
-            # 4. GPU: Compute Expert Math
-            # Wait for experts to arrive
-            self._wait_for_layer(layer_idx) 
-            
-            # Run the actual MoE MLP block now that weights are guaranteed resident
-            # (Note: Standard mlx_lm MoE modules handle the dispatch internally. 
-            # We rely on our prefetch making the data hot before it hits here.)
-            mlp_out = mlp_module(h)
-            x = x + mlp_out
+                if len(flat_logits) > top_k:
+                    top_indices = np.argpartition(flat_logits, -top_k)[-top_k:]
+                    top_indices = top_indices[np.argsort(flat_logits[top_indices])[::-1]]
+                else:
+                    top_indices = np.arange(len(flat_logits))
+                    
+                active_experts = top_indices.tolist()
+                moe_prefetcher.update_history(layer_idx, active_experts)
+                
+                for exp_idx in active_experts:
+                     if moe_prefetcher.cache.get(layer_idx, exp_idx) is None:
+                         self._enqueue_tensor(layer_idx, f"experts.{exp_idx}")
+                         
+                self._wait_for_layer(layer_idx) 
+                mlp_out = mlp_module(h)
+                x = x + mlp_out
+                
+            else:
+                # ========================================================
+                # BATCHED PATH: Expert Pre-Sorting (Prefill Phase)
+                # ========================================================
+                # Compute routing softmax
+                scores = mx.softmax(logits, axis=-1)
+                
+                # Get top-k indices and values using MLX built-ins
+                # MLX topk is available in newer versions, assuming it exists or fallback
+                # For safety across MLX versions, we'll use a sort if topk is missing
+                if hasattr(mx, "topk"):
+                    top_scores, top_indices = mx.topk(scores, k=top_k, axis=-1)
+                else:
+                    sorted_indices = mx.argsort(scores, axis=-1)
+                    top_indices = sorted_indices[..., -top_k:]
+                    # Reverse to get descending order
+                    top_indices = top_indices[..., ::-1]
+                    # Gather scores
+                    top_scores = mx.take_along_axis(scores, top_indices, axis=-1)
+                
+                # Flatten everything to 1D
+                flat_indices = mx.reshape(top_indices, (-1,))
+                flat_scores = mx.reshape(top_scores, (-1,))
+                
+                # Normalize scores if required by architecture
+                flat_scores = flat_scores / mx.sum(top_scores, axis=-1, keepdims=True).reshape(-1,)
+                
+                final_mlp_out = mx.zeros_like(h)
+                
+                # Find unique experts required for this batch
+                import numpy as np
+                unique_experts = np.unique(np.array(flat_indices)).tolist()
+                
+                # Dispatch prefetch for all needed experts
+                for exp_idx in unique_experts:
+                    if moe_prefetcher.cache.get(layer_idx, exp_idx) is None:
+                        self._enqueue_tensor(layer_idx, f"experts.{exp_idx}")
+                        
+                # Execute expert by expert
+                for exp_idx in unique_experts:
+                    self._wait_for_layer(layer_idx) # Wait for this specific expert's IO
+                    
+                    # 1. Find which tokens requested this expert
+                    token_mask = (flat_indices == exp_idx)
+                    
+                    if not mx.any(token_mask).item():
+                        continue
+                        
+                    # 2. Extract weights
+                    expert_weights = flat_scores[token_mask]
+                    
+                    # 3. Map flattened index back to original sequence token ID
+                    token_ids = mx.arange(seq_len * top_k)[token_mask] // top_k
+                    
+                    # Ensure dimensions match for extraction
+                    # h is [batch, seq, dim], assume batch=1 for standard prefill
+                    expert_input = h[0, token_ids, :]
+                    
+                    # 4. Compute Expert (only for active tokens)
+                    expert_module = getattr(mlp_module, "experts")[exp_idx]
+                    expert_out = expert_module(expert_input)
+                    
+                    expert_out = expert_out * mx.expand_dims(expert_weights, axis=-1)
+                    
+                    # 5. Scatter Add results
+                    # MLX scatter requires updates to match indices
+                    final_mlp_out[0] = mx.scatter_add(final_mlp_out[0], token_ids, expert_out)
+                    
+                    mx.eval(final_mlp_out)
+                    
+                    # Yield VRAM immediately
+                    # In a real system we'd explicitly clear this expert if we are over budget
+                    mx.metal.clear_cache()
+                    
+                x = x + final_mlp_out
             
         mx.eval(x)
         mx.metal.clear_cache()
