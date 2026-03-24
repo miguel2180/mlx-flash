@@ -62,7 +62,8 @@ class GlobalScheduler:
     Instead of isolated components making blind decisions, the GlobalScheduler
     owns the 'Task Graph' and issues commands to the IO threads and GPU dispatch.
     """
-    def __init__(self, cost_model: UnifiedCostModel, cache_manager, io_worker):
+    def __init__(self, cost_model, cache_manager, io_worker):
+        # cost_model can be UnifiedCostModel or LearnedOracle
         self.cost_model = cost_model
         self.cache = cache_manager
         self.io = io_worker
@@ -75,6 +76,28 @@ class GlobalScheduler:
         self.current_execution_layer = 0
         self.lock = threading.Lock()
         
+    def _calculate_priority(self, task_type: str, layer_idx: int, freq: float = 1.0, size_bytes: int = 16*1024**2):
+        if hasattr(self.cost_model, 'extract_io_features'):
+            # It's the LearnedOracle
+            return self.cost_model.get_urgency_score(
+                current_layer=self.current_execution_layer,
+                target_layer=layer_idx,
+                is_blocking=False,
+                task_type=task_type,
+                freq=freq,
+                task_size_bytes=size_bytes,
+                queue_depth=len(self.ready_queue) + len(self.active_tasks)
+            )
+        else:
+            # It's the legacy UnifiedCostModel
+            return self.cost_model.get_urgency_score(
+                current_layer=self.current_execution_layer,
+                target_layer=layer_idx,
+                is_blocking=False,
+                task_type=task_type,
+                freq=freq
+            )
+        
     def submit_graph(self, layer_idx: int, graph_nodes: List[Dict[str, Any]]):
         """
         Receives a computational subgraph for a specific layer.
@@ -86,7 +109,7 @@ class GlobalScheduler:
                     task_id=node['id'],
                     layer_idx=layer_idx,
                     task_type=node['type'],
-                    priority_score=self.cost_model.get_urgency_score(self.current_execution_layer, layer_idx, False, node['type']),
+                    priority_score=self._calculate_priority(node['type'], layer_idx, size_bytes=node.get('size_bytes', 16*1024**2)),
                     dependencies=node.get('deps', []),
                     callback=node.get('callback')
                 )
@@ -103,11 +126,12 @@ class GlobalScheduler:
             if task_id in self.active_tasks:
                 task = self.active_tasks.pop(task_id)
                 
-                # Update cost model
-                if task.task_type.startswith('io'):
-                    self.cost_model.ema_io_ms_per_mb = 0.8 * self.cost_model.ema_io_ms_per_mb + 0.2 * (duration_ms / max(1, size_bytes/1e6))
-                elif task.task_type == 'gpu_compute':
-                    self.cost_model.ema_compute_ms_per_mb = 0.8 * self.cost_model.ema_compute_ms_per_mb + 0.2 * (duration_ms / max(1, size_bytes/1e6))
+                # Update cost model (only if using legacy model, learned model updates via profiler)
+                if not hasattr(self.cost_model, 'extract_io_features'):
+                    if task.task_type.startswith('io'):
+                        self.cost_model.ema_io_ms_per_mb = 0.8 * self.cost_model.ema_io_ms_per_mb + 0.2 * (duration_ms / max(1, size_bytes/1e6))
+                    elif task.task_type == 'gpu_compute':
+                        self.cost_model.ema_compute_ms_per_mb = 0.8 * self.cost_model.ema_compute_ms_per_mb + 0.2 * (duration_ms / max(1, size_bytes/1e6))
                 
                 # Resolve dependencies
                 ready_new = []
@@ -120,7 +144,7 @@ class GlobalScheduler:
                 for p_id in ready_new:
                     ready_task = self.pending_tasks.pop(p_id)
                     # Re-evaluate priority before pushing
-                    ready_task.priority_score = self.cost_model.get_urgency_score(self.current_execution_layer, ready_task.layer_idx, True, ready_task.task_type)
+                    ready_task.priority_score = self._calculate_priority(ready_task.task_type, ready_task.layer_idx)
                     heapq.heappush(self.ready_queue, ready_task)
 
     def schedule_tick(self):
