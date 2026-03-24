@@ -226,9 +226,19 @@ class FlashLLM(nn.Module):
 
         # Initialize PipelinedExecutor if pipelining is enabled
         pipelined_executor = None
+        moe_prefetcher = None
         if getattr(self._config, 'pipelined_execution', False):
             from .pipeline.executor import PipelinedExecutor
             pipelined_executor = PipelinedExecutor(self.mmap_cache)
+            
+            # Check if this is an MoE model
+            is_moe = any(hasattr(l, "mlp") and hasattr(l.mlp, "gate") for l in self._layers[:2]) or \
+                     any(hasattr(l, "mixer") and hasattr(l.mixer, "gate") for l in self._layers[:2])
+                     
+            if is_moe and self.mmap_cache:
+                from .moe.manager import MoEPrefetcher, ExpertCache
+                expert_cache = ExpertCache(max_experts=getattr(self._config, "expert_cache_size", 8))
+                moe_prefetcher = MoEPrefetcher(self.mmap_cache.prefetch_worker, expert_cache)
 
         for i in range(self._n_layers):
             layer = self._layers[i]
@@ -249,9 +259,17 @@ class FlashLLM(nn.Module):
             
             if pipelined_executor is not None:
                 t0_compute = time.perf_counter()
-                h = pipelined_executor.execute_dense_layer(
-                    h, layer, i, mask=mask if has_mask else None, cache=cache_entry if has_cache else None
-                )
+                
+                # Dynamic routing for MoE vs Dense
+                if moe_prefetcher is not None and (hasattr(layer, "mlp") and hasattr(layer.mlp, "gate") or hasattr(layer, "mixer") and hasattr(layer.mixer, "gate")):
+                    h = pipelined_executor.execute_moe_layer(
+                        h, layer, i, moe_prefetcher, mask=mask if has_mask else None, cache=cache_entry if has_cache else None
+                    )
+                else:
+                    h = pipelined_executor.execute_dense_layer(
+                        h, layer, i, mask=mask if has_mask else None, cache=cache_entry if has_cache else None
+                    )
+                    
                 compute_time = time.perf_counter() - t0_compute
                 if self.mmap_cache and hasattr(self.mmap_cache, 'record_compute_time'):
                     self.mmap_cache.record_compute_time(compute_time)
