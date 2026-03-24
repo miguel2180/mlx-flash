@@ -80,6 +80,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = ["-v", "--tb=short"]
+markers = [
+    "stress: marks tests as stress/adversarial tests (run with -m stress)",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

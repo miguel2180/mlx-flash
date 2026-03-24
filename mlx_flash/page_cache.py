@@ -147,6 +147,11 @@ def set_sequential(mm: mmap.mmap, offset: int, length: int) -> bool:
     return madvise_range(mm, offset, length, MADV_SEQUENTIAL)
 
 
+def drop_page_cache(mm: mmap.mmap, offset: int, length: int) -> bool:
+    """Force the OS to drop the specified range from the page cache (MADV_DONTNEED)."""
+    return madvise_range(mm, offset, length, MADV_DONTNEED)
+
+
 class PageCacheRegion:
     """
     Context manager that prefetches a mmap region on entry and
