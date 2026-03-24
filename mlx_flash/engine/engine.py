@@ -24,7 +24,9 @@ class FlashEngine:
         # (e.g. replacing nn.Linear with TiledLinear)
         self.model = self.registry.dispatch_reduce("on_model_load", model)
         
-        self._n_layers = len(self.model.layers) if hasattr(self.model, "layers") else len(self.model.model.layers)
+        # Proxy standard MLX properties for compatibility with generation scripts
+        self.layers = self.model.layers if hasattr(self.model, "layers") else getattr(self.model, "model", self.model).layers
+        self._n_layers = len(self.layers)
         
         # We store layer signatures to avoid introspection in the hot loop
         self._layer_sigs = self._inspect_layers()
