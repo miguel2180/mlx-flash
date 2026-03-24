@@ -17,7 +17,7 @@ class SafetensorsMmapCache:
         self.model_path = Path(model_path)
         self.file_mmaps: dict[str, mmap.mmap] = {}
         self.file_handles: dict[str, Any] = {}
-        self.tensor_locations: dict[str, tuple[mmap.mmap, int, int, str]] = {}
+        self.tensor_locations: dict[str, tuple[mmap.mmap, int, int, str, str]] = {}
         
         self._load_all()
         self.prefetch_worker = BackgroundPrefetcher(self.file_handles)
@@ -53,20 +53,21 @@ class SafetensorsMmapCache:
                     if tensor_name == "__metadata__":
                         continue
                     offsets = info.get("data_offsets")
+                    dtype = info.get("dtype", "f16") # default to f16 if missing
                     if offsets and len(offsets) == 2:
                         abs_start = headers_end + offsets[0]
                         abs_end = headers_end + offsets[1]
-                        self.tensor_locations[tensor_name] = (mm, abs_start, abs_end, sf.name)
+                        self.tensor_locations[tensor_name] = (mm, abs_start, abs_end, sf.name, dtype)
                         
 
-    def get_tensor_range(self, tensor_name: str) -> tuple[mmap.mmap, int, int] | None:
-        """Return the (mmap_obj, absolute_start, absolute_end) for a given tensor."""
+    def get_tensor_range(self, tensor_name: str) -> tuple[mmap.mmap, int, int, str] | None:
+        """Return the (mmap_obj, absolute_start, absolute_end, dtype) for a given tensor."""
         info = self.tensor_locations.get(tensor_name)
         if info:
-            return (info[0], info[1], info[2])
+            return (info[0], info[1], info[2], info[4])
         return None
     
-    def get_layer_ranges(self, layer_idx: int) -> dict[mmap.mmap, tuple[int, int, str]]:
+    def get_layer_ranges(self, layer_idx: int) -> dict[mmap.mmap, tuple[int, int, str, str]]:
         """
         Groups all tensors belonging to `layer_idx` into contiguous or combined byte ranges 
         per physical mmap file to minimize madvise calls.
@@ -75,31 +76,36 @@ class SafetensorsMmapCache:
         layer_regex = re.compile(rf'\b(?:layers|h|blocks)\.{layer_idx}\.')
         
         # Collect all intervals for this layer, grouped by mmap
-        intervals_by_mmap: dict[mmap.mmap, list[tuple[int, int, str]]] = {}
+        intervals_by_mmap: dict[mmap.mmap, list[tuple[int, int, str, str]]] = {}
         
         for t_name, info in self.tensor_locations.items():
             if layer_regex.search(t_name):
-                mm, start, end, filename = info
+                mm, start, end, filename, dtype = info
                 if mm not in intervals_by_mmap:
                     intervals_by_mmap[mm] = []
-                # Also store filename to pass to the BackgroundPrefetcher
-                intervals_by_mmap[mm].append((start, end, filename))
+                intervals_by_mmap[mm].append((start, end, filename, dtype))
                 
         # Merge overlapping/adjacent intervals
-        merged: dict[mmap.mmap, tuple[int, int, str]] = {}
+        merged: dict[mmap.mmap, tuple[int, int, str, str]] = {}
         for mm, intervals in intervals_by_mmap.items():
             intervals.sort(key=lambda x: x[0])
             min_start = intervals[0][0]
             max_end = intervals[-1][1]
             filename = intervals[0][2]
-            merged[mm] = (min_start, max_end, filename)
+            dtype = intervals[0][3] # Just take the first dtype for alignment purposes
+            merged[mm] = (min_start, max_end, filename, dtype)
             
         return merged
         
     def prefetch_layer_background(self, layer_idx: int):
         ranges = self.get_layer_ranges(layer_idx)
-        for _, (start, end, filename) in ranges.items():
-            self.prefetch_worker.enqueue(filename, start, end - start, layer_idx)
+        for _, (start, end, filename, dtype) in ranges.items():
+            align_bytes = 1
+            if dtype == "q4_0": align_bytes = 18
+            elif dtype == "q8_0": align_bytes = 34
+            elif dtype.startswith("q"): align_bytes = 256 # Assume k-quants are 256-value aligned
+            
+            self.prefetch_worker.enqueue(filename, start, end - start, layer_idx, align_bytes=align_bytes)
 
     def wait_for_layer(self, layer_idx: int):
         self.prefetch_worker.wait_for_layer(layer_idx)

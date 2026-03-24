@@ -310,7 +310,7 @@ class FlashLLM(nn.Module):
             if len(pending_releases) >= pipeline_depth:
                 mx.synchronize()
                 oldest_ranges = pending_releases.pop(0)
-                for mm, (start, end, _) in oldest_ranges.items():
+                for mm, (start, end, *_) in oldest_ranges.items():
                     if hasattr(page_cache, "release"):
                         page_cache.release(mm, start, end - start, strategy=self._config.eviction_strategy)
                     

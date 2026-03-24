@@ -21,8 +21,12 @@ class PipelinedExecutor:
         # In a fully realized system, we would filter `ranges` by tensor_name_hint
         # For now, we use the existing layer-level prefetch as a coarse fallback
         # if fine-grained isn't implemented in the cache yet.
-        for _, (start, end, filename) in ranges.items():
-             self.mmap_cache.prefetch_worker.enqueue(filename, start, end - start, layer_idx)
+        for _, (start, end, filename, dtype) in ranges.items():
+            align_bytes = 1
+            if dtype == "q4_0": align_bytes = 18
+            elif dtype == "q8_0": align_bytes = 34
+            elif dtype.startswith("q"): align_bytes = 256
+            self.mmap_cache.prefetch_worker.enqueue(filename, start, end - start, layer_idx, align_bytes=align_bytes)
 
     def _wait_for_layer(self, layer_idx: int):
         if self.mmap_cache and hasattr(self.mmap_cache, 'wait_for_layer'):

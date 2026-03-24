@@ -28,8 +28,8 @@ class BackgroundPrefetcher:
         self.thread.start()
         
     def _worker(self):
-        # 16MB chunking provides excellent sustained SSD queue depth
-        chunk_size = 16 * 1024 * 1024 
+        # Base ~16MB chunking provides excellent sustained SSD queue depth
+        base_chunk_size = 16 * 1024 * 1024 
         
         while self.running:
             try:
@@ -37,7 +37,7 @@ class BackgroundPrefetcher:
                 if task is None:
                     continue
                     
-                layer_idx, filename, offset, length = task
+                layer_idx, filename, offset, length, align_bytes = task
                 f = self.file_handles.get(filename)
                 
                 t0 = time.perf_counter()
@@ -46,6 +46,11 @@ class BackgroundPrefetcher:
                     fd = f.fileno()
                     end = offset + length
                     curr = offset
+                    
+                    # Ensure chunk size perfectly aligns with quantization block boundaries
+                    # (e.g. 18 bytes for Q4_0, 34 bytes for Q8_0) to prevent partial block reads
+                    chunk_size = (base_chunk_size // align_bytes) * align_bytes if align_bytes > 0 else base_chunk_size
+                    
                     while curr < end and self.running:
                         try:
                             chunk = min(chunk_size, end - curr)
@@ -83,13 +88,13 @@ class BackgroundPrefetcher:
         while layer_idx not in self.completed_prefetches and self.io_ema > 0 and self.running:
             time.sleep(0.001)
 
-    def enqueue(self, filename: str, offset: int, length: int, layer_idx: Optional[int] = None):
+    def enqueue(self, filename: str, offset: int, length: int, layer_idx: Optional[int] = None, align_bytes: int = 1):
         if not self.running:
             return
         if layer_idx is not None:
             self.completed_prefetches.discard(layer_idx)
         with contextlib.suppress(queue.Full):
-            self.queue.put_nowait((layer_idx, filename, offset, length))
+            self.queue.put_nowait((layer_idx, filename, offset, length, align_bytes))
 
     def shutdown(self):
         self.running = False
