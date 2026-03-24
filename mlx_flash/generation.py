@@ -191,7 +191,6 @@ class FlashLLM(nn.Module):
         # Clean environment
         import gc
         gc.collect()
-        mx.clear_cache()
 
         x = args[0] if len(args) > 0 else kwargs.get("x")
         cache = kwargs.get("cache")
@@ -334,7 +333,6 @@ class FlashLLM(nn.Module):
                 oldest = self._materialized_layers.pop(0)
                 self._reload_layer_weights(oldest)
                 gc.collect()
-                mx.clear_cache()
                 try: 
                     mx.synchronize()
                     mem_active = mx.metal.get_active_memory()
@@ -351,7 +349,6 @@ class FlashLLM(nn.Module):
                     if hasattr(page_cache, "release"):
                         page_cache.release(mm, start, end - start, strategy=self._config.eviction_strategy)
                     
-            mx.clear_cache()
             if self._config.debug:
                 print(f"[flash] layer {i:2d}: Metal active {mem_active/1e6:.0f} MB", file=sys.stderr)
         
@@ -359,7 +356,6 @@ class FlashLLM(nn.Module):
         mx.eval(result)
         mx.synchronize()
         self._reload_other_weights()
-        mx.clear_cache()
         gc.collect()
         return result
 
@@ -402,7 +398,6 @@ class FlashGenerationLoop:
 
         import gc
         gc.collect()
-        mx.clear_cache()
 
         prompt_arr = mx.array(self.tokenizer.encode(prompt)) if isinstance(prompt, str) else mx.array(prompt)
         detokenizer = self.tokenizer.detokenizer
@@ -417,7 +412,6 @@ class FlashGenerationLoop:
             detokenizer.add_token(tid)
             if detokenizer.last_segment: yield detokenizer.last_segment
             gc.collect()
-            mx.clear_cache()
             if tid == self.tokenizer.eos_token_id: break
         
         detokenizer.finalize()
@@ -425,7 +419,6 @@ class FlashGenerationLoop:
 
     def shutdown(self):
         import contextlib
-        mx.clear_cache()
         if self.flash_model is not None and getattr(self.flash_model, "mmap_cache", None) is not None:
             with contextlib.suppress(Exception): self.flash_model.mmap_cache.shutdown()
         self.flash_model = None

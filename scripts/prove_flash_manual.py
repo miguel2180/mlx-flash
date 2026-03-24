@@ -34,7 +34,6 @@ def manual_forward(model, inputs, flash_manager):
         # EVICT WEIGHTS
         dummy_weights = {k: mx.array(0.0) for k in layer_weights}
         flash_manager._loader._update_model_weights(layer, dummy_weights)
-        mx.metal.clear_cache()
         
     x = model.backbone.norm_f(x)
     logits = model.lm_head(x)

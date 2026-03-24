@@ -35,7 +35,6 @@ def test_extreme_ram_starvation(tmp_model_dir):
     # Force a garbage collection to get a clean baseline
     import gc
     gc.collect()
-    mx.metal.clear_cache()
     
     start_ram = process.memory_info().rss
     

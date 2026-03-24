@@ -88,7 +88,6 @@ def get_ram_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1e6
 
 if __name__ == "__main__":
-    mx.metal.clear_cache()
     model_dir = Path("/tmp/mlx_synthetic_proof")
     if not (model_dir / "model.safetensors").exists():
         create_massive_synthetic(model_dir, n_layers=16, hidden_dim=2048)
@@ -107,7 +106,6 @@ if __name__ == "__main__":
         print(f"    Standard RAM required: {rss_normal - rss_baseline:.1f} MB overhead")
         del model
         gc.collect()
-        mx.metal.clear_cache()
     except Exception as e:
         print(f"    Standard MLX Failed/OOM: {e}")
 

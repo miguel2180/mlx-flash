@@ -70,7 +70,6 @@ class PipelinedExecutor:
             mx.eval(x)
             mx.synchronize()
             prof.record_compute_interval(t_p2_0, time.perf_counter(), f"L{layer_idx}_p2_attn")
-            mx.metal.clear_cache()
             
         # ==========================================
         # PHASE 3: MoE ROUTING & SPECULATIVE FETCH
@@ -189,13 +188,11 @@ class PipelinedExecutor:
                     mx.eval(final_mlp_out)
                     mx.synchronize()
                     prof.record_compute_interval(t_expert_s, time.perf_counter(), f"L{layer_idx}_exp{exp_idx}")
-                    mx.metal.clear_cache()
                     
                 x = x + final_mlp_out
             
         mx.eval(x)
         mx.synchronize()
-        mx.metal.clear_cache()
         return x
     def execute_dense_layer(self, x: mx.array, layer: nn.Module, layer_idx: int, mask=None, cache=None) -> mx.array:
         from benchmarks.profiler.profiler import StreamingProfiler
@@ -250,7 +247,6 @@ class PipelinedExecutor:
                      mx.eval(cache.keys, cache.values)
             mx.synchronize()
             prof.record_compute_interval(t_p2_0, time.perf_counter(), f"L{layer_idx}_p2_attn")
-            mx.metal.clear_cache()
             
         # ==========================================
         # PHASE 3: MLP EXECUTION
@@ -277,6 +273,5 @@ class PipelinedExecutor:
         mx.eval(x)
         mx.synchronize()
         prof.record_compute_interval(t_p3_0, time.perf_counter(), f"L{layer_idx}_p3_mlp")
-        mx.metal.clear_cache()
         
         return x

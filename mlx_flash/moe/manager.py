@@ -51,7 +51,6 @@ class ExpertCache:
             
             # Explicitly delete and clear metal cache to free VRAM
             del oldest_weights
-            mx.metal.clear_cache()
             
         # Insert new expert
         self.cache[key] = expert_weights

@@ -79,7 +79,6 @@ class FlashEngine:
         """
         import gc
         gc.collect()
-        mx.clear_cache()
 
         ctx = ExecutionContext(self, x, mask, cache)
         
@@ -191,7 +190,6 @@ class FlashEngine:
             kwargs["prefill_step_size"] = getattr(self.config, "prefill_chunk_size", 32)
 
         gc.collect()
-        mx.clear_cache()
 
         prompt_arr = mx.array(self.tokenizer.encode(prompt)) if isinstance(prompt, str) else mx.array(prompt)
         detokenizer = self.tokenizer.detokenizer
@@ -204,7 +202,6 @@ class FlashEngine:
             detokenizer.add_token(tid)
             if detokenizer.last_segment: yield detokenizer.last_segment
             gc.collect()
-            mx.clear_cache()
             if tid == self.tokenizer.eos_token_id: break
         
         detokenizer.finalize()
@@ -212,4 +209,3 @@ class FlashEngine:
 
     def shutdown(self):
         self.registry.dispatch("on_shutdown")
-        mx.clear_cache()

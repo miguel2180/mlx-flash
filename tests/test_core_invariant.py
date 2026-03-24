@@ -50,7 +50,6 @@ class TestFlashInvariant:
         except ImportError:
             pytest.skip("mlx_lm not installed")
         
-        mx.metal.clear_cache()
         baseline = metal_active_mb()
         
         model, _ = mlx_lm.load(str(tmp_model_dir), lazy=True)
@@ -69,7 +68,6 @@ class TestFlashInvariant:
         below 3 × single_layer_size at all times.
         
         If this fails: mx.eval() is not being called per-layer, OR
-        mx.metal.clear_cache() is not freeing the weight allocations, OR
         the FlashLLM wrapper is building a unified graph instead of sequential ones.
         """
         # Compute single layer size
@@ -133,7 +131,6 @@ class TestFlashInvariant:
             f"INVARIANT 2 FAILED: Peak Metal memory {tracker.peak:.1f} MB "
             f"exceeded budget {budget_mb:.1f} MB (3× layer {layer_bytes/1e6:.1f} MB + overhead). "
             f"Layer weights are not being freed between evaluations. "
-            f"Check: mx.eval() is called per-layer, mx.metal.clear_cache() is called."
         )
     
     def test_3_metal_memory_released_after_shutdown(self, flash_config, tmp_model_dir):
@@ -150,7 +147,6 @@ class TestFlashInvariant:
         if importlib.util.find_spec("mlx_lm") is None:
             pytest.skip("mlx_lm not installed")
         
-        mx.metal.clear_cache()
         baseline = metal_active_mb()
         
         manager = FlashManager(flash_config)
@@ -166,7 +162,6 @@ class TestFlashInvariant:
         manager.shutdown()
         del flash_model, manager
         gc.collect()
-        mx.metal.clear_cache()
         
         after = metal_active_mb()
         assert after - baseline < 100, (

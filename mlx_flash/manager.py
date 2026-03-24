@@ -142,6 +142,5 @@ class FlashManager:
         self.tokenizer = None
         
         # 4. Clear Metal cache
-        mx.clear_cache()
 
 __all__ = ["FlashManager"]

@@ -167,12 +167,10 @@ def reset_metal_state():
     """Clear Metal cache before and after each test."""
     try:
         import mlx.core as mx
-        mx.metal.clear_cache()
     except (ImportError, AttributeError):
         pass
     yield
     try:
-        mx.metal.clear_cache()
         import gc
         gc.collect()
     except (ImportError, AttributeError):

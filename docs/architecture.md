@@ -72,16 +72,14 @@ achieve close to the device's sequential bandwidth even for discontiguous reads
         h = layer_i(h, mask=mask, cache=cache[i])   ← builds ONE layer's graph
         mx.eval(h, cache[i].keys, cache[i].values)  ← materialise immediately
         mx.synchronize()                              ← wait for GPU to finish
-        mx.metal.clear_cache()                        ← return Metal buffers
 
 This means Metal holds at most **one layer's weights + activations** at any time.
 For a 70B model, a single Q4 layer is ~600 MB — so peak Metal active stays
 below 1 GB even though the full model is 40 GB on disk.
 
 The `page_cache.py` module provides `madvise()` wrappers (`MADV_WILLNEED`,
-`MADV_FREE`) that can be used to hint the OS about upcoming page needs,
-but the primary eviction mechanism is `mx.metal.clear_cache()` within the
-layer loop. Future versions (v0.2+) will integrate `madvise()` prefetch into
+`MADV_FREE`) that can be used to hint the OS about upcoming page needs.
+Future versions (v0.2+) will integrate `madvise()` prefetch into
 the loop to hide SSD I/O latency behind GPU compute.
 
 ## Q4_0 Dequantisation
@@ -139,7 +137,7 @@ mlx_flash/
 To maintain a strict RAM budget (e.g., < 1GB for Llama-70B), mlx-flash manages three distinct memory consumers:
 
 ### 1. Weights (Flash Streaming)
-Weights are loaded via `mx.load(lazy=True)`, meaning they are memory-mapped and consume zero RSS until used. `FlashLLM` evaluates layers one-by-one and calls `mx.clear_cache()` to release weight buffers from Metal immediately after each layer.
+Weights are loaded via `mx.load(lazy=True)`, meaning they are memory-mapped and consume zero RSS until used. `FlashLLM` evaluates layers one-by-one, relying on MLX's internal allocator to release weight buffers from active Metal memory.
 
 ### 2. KV Cache (Rotating & Disk Offloading)
 For long conversations, the KV cache grows linearly. We address this via:

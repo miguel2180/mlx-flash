@@ -46,7 +46,6 @@ The solution is `FlashLLM`, a duck-typed `nn.Module` proxy that wraps any mlx-lm
         h = layer_i(h, mask=mask, cache=cache[i])
         mx.eval(h, cache[i].keys, cache[i].values)
         mx.synchronize()
-        mx.metal.clear_cache()
     ```
 
 4. **Why `__call__` wrapping works here (but not in Approach B):**

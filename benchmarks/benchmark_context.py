@@ -69,7 +69,6 @@ def run_benchmark_iter(model_path: Path, context_len: int, disk_kv: bool):
     prompt = [0] * context_len
     
     # Cleanup before run
-    mx.metal.clear_cache()
     gc.collect()
     
     start_rss = get_rss_mb()

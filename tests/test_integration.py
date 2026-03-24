@@ -86,7 +86,6 @@ def test_lazy_load_uses_zero_metal_ram(tmp_model_dir, flash_config):
     import mlx_lm
     
     # Ensure Metal cache is clean
-    mx.clear_cache()
     before = mx.get_active_memory()
     
     # lazy load

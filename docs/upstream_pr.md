@@ -39,7 +39,6 @@ This PR integrates `FlashLLM` support, allowing users to run models significantl
 **Key Changes**:
 - Supports `lazy=True` loading in `model_kit.py` to keep initial RSS near zero.
 - Replaces the unified lazy graph with a synchronous, per-layer execution loop.
-- Forces `mx.metal.clear_cache()` between layers to strictly bound Metal memory usage.
 - Performance: ~2-4 tok/s for 70B models on M4 Air (SSD-bottlenecked).
 
 **Compatibility**:

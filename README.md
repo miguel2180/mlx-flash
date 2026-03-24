@@ -46,7 +46,6 @@ Standard MLX uses "lazy graph evaluation," which attempts to build a massive gra
 1. Loading weights as **lazy mmap-backed arrays** via `mlx_lm.load(path, lazy=True)`.
 2. Intercepting the forward pass to execute **one layer at a time**.
 3. Forcing materialization via **`mx.eval()` + `mx.synchronize()`** after each layer.
-4. Calling **`mx.metal.clear_cache()`** between layers to immediately release weight buffers.
 
 ---
 
@@ -89,8 +88,7 @@ graph TD
     subgraph "Per-Layer Loop"
         C --"Layer i"--> D[mx.eval]
         D --"Sync GPU"--> E[mx.synchronize]
-        E --"Free Metal Pool"--> F[mx.metal.clear_cache]
-        F --"MADV_FREE"--> G[Release RAM]
+        E --"MADV_FREE"--> G[Release RAM]
         G --"Next Layer"--> C
     end
     C --"Final Output"--> G2[Token]
@@ -125,7 +123,6 @@ graph TB
     subgraph METAL["Metal Runtime"]
         LA["Lazy Arrays\n(mmap-backed)"]
         EV["mx.eval()"]
-        CL_C["mx.metal.clear_cache()"]
     end
 
     CL --> GS

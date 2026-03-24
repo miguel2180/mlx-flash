@@ -1,12 +1,12 @@
 from .engine import FlashEngine
-from .hooks import InferenceHook, ExecutionContext, HookRegistry
+from .hooks import InferenceHook, ExecutionContext, ExecutionGraph
 from .strategies import LayerStrategy, StandardStrategy, PipelinedDenseStrategy, PipelinedMoEStrategy
 
 __all__ = [
     "FlashEngine",
     "InferenceHook",
     "ExecutionContext",
-    "HookRegistry",
+    "ExecutionGraph",
     "LayerStrategy",
     "StandardStrategy",
     "PipelinedDenseStrategy",

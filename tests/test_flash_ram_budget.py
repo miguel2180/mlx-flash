@@ -30,7 +30,6 @@ class TestFlashRAMBudget:
         regardless of machine RAM.
         """
         # Start fresh
-        mx.metal.clear_cache()
         gc.collect()
         rss_before = get_rss_mb()
         
@@ -81,7 +80,6 @@ class TestFlashRAMBudget:
         # if the KV cache were held synchronously in the strict Metal budget)
         prompt_tokens = [0] * 4000
         
-        mx.metal.clear_cache()
         gc.collect()
         rss_before = get_rss_mb()
         

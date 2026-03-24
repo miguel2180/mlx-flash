@@ -103,7 +103,6 @@ def main():
         print(" WARNING: Peak RAM is significantly higher than expected (> 2x Layer Size)!")
         print(" Possible causes:")
         print(" - \"WARNING: Layers are not being zeroed after eval\"")
-        print(" - \"WARNING: mx.metal.clear_cache() may not have been called\"")
         print(" - \"WARNING: mmap slices may have been .copy()'d before release\"")
         print(" - \"WARNING: mlx_lm.load() was called before FlashManager could intercept\"")
         print("!"*80)

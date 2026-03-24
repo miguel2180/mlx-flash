@@ -48,7 +48,6 @@ class TiledColumnLinear(nn.Module):
             
             # Clear intermediate metal buffers
             del w_tile
-            mx.metal.clear_cache()
             
         # Concatenate along the feature dimension
         return mx.concatenate(outputs, axis=-1)
@@ -97,7 +96,6 @@ class TiledRowLinear(nn.Module):
                 pass
             
             del w_tile, x_tile, y_partial
-            mx.metal.clear_cache()
             
         if self.bias is not None:
             y_accum = y_accum + self.bias.astype(mx.float32)
