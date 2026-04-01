@@ -53,6 +53,7 @@ Issues = "https://github.com/matt-k-wong/mlx-flash/issues"
 Changelog = "https://github.com/matt-k-wong/mlx-flash/blob/main/CHANGELOG.md"
 
 [project.scripts]
+mlx-flash = "mlx_flash.cli:main"
 flash-monitor = "mlx_flash.monitor:run_monitor"
 flash-bench = "benchmarks.bench_flash:cli"
 

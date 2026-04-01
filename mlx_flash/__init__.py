@@ -19,12 +19,14 @@ Or via Modelfile:
 """
 
 from .config import FlashConfig
+from .engine.engine import FlashEngine
 from .generation import FlashGenerationLoop, FlashLLM
 from .manager import FlashManager
 
 __all__ = [
     "FlashConfig",
     "FlashManager",
+    "FlashEngine",
     "FlashLLM",
     "FlashGenerationLoop",
 ]

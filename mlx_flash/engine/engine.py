@@ -1,4 +1,5 @@
 from typing import Any, Dict, Generator, Iterator, Optional, Tuple, Union
+from pathlib import Path
 import time
 import mlx.core as mx
 import mlx.nn as nn
@@ -10,15 +11,17 @@ from ..config import FlashConfig
 from .hooks import ExecutionContext, ExecutionGraph
 from .strategies import LayerStrategy, StandardStrategy
 
-class FlashEngine:
+class FlashEngine(nn.Module):
     """
     Replaces FlashGenerationLoop. 
     A modular, hook-based orchestration engine for executing MLX models.
     """
-    def __init__(self, model: nn.Module, tokenizer: Any, config: FlashConfig):
+    def __init__(self, model: nn.Module, tokenizer: Any, config: FlashConfig, model_path: Optional[Union[str, Path]] = None):
+        super().__init__()
         self.config = config
         self.tokenizer = tokenizer
         self.registry = ExecutionGraph()
+        self.model_path = Path(model_path) if model_path else None
         
         # Register standard hooks based on configuration
         from .hooks import PipeliningHook, TilingHook, DiagnosticsHook
@@ -32,7 +35,8 @@ class FlashEngine:
         self.model = self.registry.dispatch_reduce("on_model_load", model)
         
         # Proxy standard MLX properties for compatibility with generation scripts
-        self.layers = self.model.layers if hasattr(self.model, "layers") else getattr(self.model, "model", self.model).layers
+        inner = getattr(self.model, "model", getattr(self.model, "backbone", self.model))
+        self.layers = getattr(inner, "layers", getattr(inner, "h", getattr(inner, "blocks", [])))
         self._n_layers = len(self.layers)
         
         # We store layer signatures to avoid introspection in the hot loop
@@ -49,10 +53,15 @@ class FlashEngine:
         except ImportError:
             pass
 
+    def parameters(self):
+        return self.model.parameters()
+
+    def make_cache(self):
+        return self.model.make_cache()
+
     def _inspect_layers(self) -> list:
         sigs = []
-        layers = self.model.layers if hasattr(self.model, "layers") else self.model.model.layers
-        for layer in layers:
+        for layer in self.layers:
             import inspect
             sig = inspect.signature(layer.__call__)
             params = sig.parameters
@@ -203,6 +212,9 @@ class FlashEngine:
         kwargs["sampler"] = make_sampler(temp=temp)
         if "prefill_step_size" not in kwargs:
             kwargs["prefill_step_size"] = getattr(self.config, "prefill_chunk_size", 32)
+        
+        # Ensure max_tokens is passed down
+        kwargs["max_tokens"] = max_tokens
 
         gc.collect()
 
@@ -215,12 +227,12 @@ class FlashEngine:
             
             tid = token.item() if hasattr(token, "item") else token
             detokenizer.add_token(tid)
-            if detokenizer.last_segment: yield detokenizer.last_segment
+            yield detokenizer.last_segment
             gc.collect()
             if tid == self.tokenizer.eos_token_id: break
         
         detokenizer.finalize()
-        if detokenizer.last_segment: yield detokenizer.last_segment
+        yield detokenizer.last_segment
 
     def shutdown(self):
         self.registry.dispatch("on_shutdown")

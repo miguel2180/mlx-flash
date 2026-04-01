@@ -91,7 +91,8 @@ def apply_flash_patch(config: FlashConfig | None = None) -> None:
                                 i, cache_dir=kv_dir, max_tokens=max_tokens,
                                 bits=getattr(config, 'kv_cache_bits', 4),
                                 local_window_size=getattr(config, 'kv_cache_local_window_size', 128)
-                            ))                        else:
+                            ))
+                        else:
                             final_cache.append(DiskKVCache(i, cache_dir=kv_dir, max_tokens=max_tokens))
                     else:
                         final_cache.append(c)

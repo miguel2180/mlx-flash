@@ -5,7 +5,7 @@ import mlx.core as mx
 import mlx_lm
 
 from .config import FlashConfig
-from .generation import FlashLLM
+from .engine.engine import FlashEngine
 
 
 class FlashManager:
@@ -67,7 +67,7 @@ class FlashManager:
             # Older MLX versions might not have this
             pass
 
-    def load(self, model_path: str | Path) -> tuple[FlashLLM, Any]:
+    def load(self, model_path: str | Path) -> tuple[FlashEngine, Any]:
         """
         Load a model in lazy mode and wrap it for Flash execution.
         """
@@ -98,7 +98,7 @@ class FlashManager:
         model, self.tokenizer = loader(str(path), lazy=True)[:2]  # type: ignore
         
         # 3. Wrap in Flash execution engine
-        self.model = FlashLLM(model, self.config, model_path=path)
+        self.model = FlashEngine(model, self.tokenizer, self.config, model_path=path)
         
         try:
             from .safetensors_mmap import SafetensorsMmapCache
@@ -134,7 +134,7 @@ class FlashManager:
                 setter = mx.metal.set_wired_limit
             setter(0)
 
-        if hasattr(self.model, 'mmap_cache') and self.model.mmap_cache:
+        if self.model is not None and hasattr(self.model, 'mmap_cache') and self.model.mmap_cache:
             import contextlib
             with contextlib.suppress(Exception):
                 self.model.mmap_cache.shutdown()
